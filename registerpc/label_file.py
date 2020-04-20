@@ -15,11 +15,13 @@ class LabelFile(object):
     suffix = '.json'
 
     def __init__(self, filename=None):
+        self.flags = []
         self.shapes = []
         self.sourcePath = None
         if filename is not None:
             self.load(filename)
         self.filename = filename
+        self.otherData = {}
 
     def load(self, filename):
         keys = [
@@ -28,52 +30,53 @@ class LabelFile(object):
             'shapes',  # polygonal annotations
             'flags',   # image level flags
         ]
-        try:
-            with open(filename, 'rb' if PY2 else 'r') as f:
-                data = json.load(f)
-            version = data.get('version')
-            if version is None:
-                logger.warn(
-                    'Loading JSON file ({}) of unknown version'
-                    .format(filename)
-                )
-            elif version.split('.')[0] != __version__.split('.')[0]:
-                logger.warn(
-                    'This JSON file ({}) may be incompatible with '
-                    'current registerpc. version in file: {}, '
-                    'current version: {}'.format(
-                        filename, version, __version__
+        if osp.exists(filename):
+            try:
+                with open(filename, 'rb' if PY2 else 'r') as f:
+                    data = json.load(f)
+                version = data.get('version')
+                if version is None:
+                    logger.warn(
+                        'Loading JSON file ({}) of unknown version'
+                        .format(filename)
                     )
-                )
+                elif version.split('.')[0] != __version__.split('.')[0]:
+                    logger.warn(
+                        'This JSON file ({}) may be incompatible with '
+                        'current registerpc. version in file: {}, '
+                        'current version: {}'.format(
+                            filename, version, __version__
+                        )
+                    )
 
-            sourcePath = data['sourcePath']
-            flags = data.get('flags') or {}
-            shapes = [
-                dict(
-                    label=s['label'],
-                    points=s['points'],
-                    shape_type=s.get('shape_type', 'polygon'),
-                    flags=s.get('flags', {}),
-                    group_id=s.get('group_id'),
-                    rack_id=s.get('rack_id'),
-                    orient=s.get('orient')
-                )
-                for s in data['shapes']
-            ]
-        except Exception as e:
-            raise LabelFileError(e)
+                sourcePath = data['sourcePath']
+                flags = data.get('flags') or {}
+                shapes = [
+                    dict(
+                        label=s['label'],
+                        points=s['points'],
+                        shape_type=s.get('shape_type', 'polygon'),
+                        flags=s.get('flags', {}),
+                        group_id=s.get('group_id'),
+                        rack_id=s.get('rack_id'),
+                        orient=s.get('orient')
+                    )
+                    for s in data['shapes']
+                ]
+            except Exception as e:
+                raise LabelFileError(e)
 
-        otherData = {}
-        for key, value in data.items():
-            if key not in keys:
-                otherData[key] = value
+            otherData = {}
+            for key, value in data.items():
+                if key not in keys:
+                    otherData[key] = value
 
-        # Only replace data after everything is loaded.
-        self.flags = flags
-        self.shapes = shapes
-        self.sourcePath = sourcePath
-        self.filename = filename
-        self.otherData = otherData
+            # Only replace data after everything is loaded.
+            self.flags = flags
+            self.shapes = shapes
+            self.sourcePath = sourcePath
+            self.filename = filename
+            self.otherData = otherData
 
     def save(
         self,

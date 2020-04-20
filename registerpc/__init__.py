@@ -6,7 +6,7 @@ import sys
 from qtpy import QT_VERSION
 
 
-__appname__ = 'labelme'
+__appname__ = 'registerpc'
 
 # Semantic Versioning 2.0.0: https://semver.org/
 # 1. MAJOR version when you make incompatible API changes;
@@ -23,5 +23,4 @@ PY3 = sys.version[0] == '3'
 del sys
 
 from registerpc.label_file import LabelFile
-from registerpc import testing
 from registerpc import utils

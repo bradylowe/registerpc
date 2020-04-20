@@ -35,6 +35,8 @@ class Canvas(QtWidgets.QWidget):
     rackChanged = QtCore.Signal(Shape)
     beamChanged = QtCore.Signal(Shape)
     rotateRack = QtCore.Signal()
+    rotatePixmap = QtCore.Signal(float)
+    translatePixmap = QtCore.Signal(float, float)
 
     CREATE, EDIT = 0, 1
 
@@ -78,6 +80,8 @@ class Canvas(QtWidgets.QWidget):
         self.hVertex = None
         self.hEdge = None
         self.movingShape = False
+        self.translating = False
+        self.rotating = False
         self._painter = QtGui.QPainter()
         self._cursor = CURSOR_DEFAULT
         # Menus:
@@ -365,6 +369,7 @@ class Canvas(QtWidgets.QWidget):
             if int(ev.modifiers()) == QtCore.Qt.ControlModifier | QtCore.Qt.ShiftModifier:
                 self.breakRack.emit(pos)
                 return
+            '''
             menu = self.menus[len(self.selectedShapesCopy) > 0]
             self.restoreCursor()
             if not menu.exec_(self.mapToGlobal(ev.pos())) \
@@ -372,6 +377,7 @@ class Canvas(QtWidgets.QWidget):
                 # Cancel the move by deleting the shadow copy.
                 self.selectedShapesCopy = []
                 self.repaint()
+            '''
         elif ev.button() == QtCore.Qt.LeftButton and self.selectedShapes:
             self.overrideCursor(CURSOR_GRAB)
         elif ev.button() == QtCore.Qt.LeftButton and self.selectedVertex():
@@ -489,26 +495,13 @@ class Canvas(QtWidgets.QWidget):
                 count += 1
         center /= count
         a, b = pos - center, self.prevPoint - center
-        '''
-        if a.x():
-            theta_a = np.arctan(a.y() / a.x())
-        elif a.y() > 0:
-            theta_a = np.pi / 2.0
-        else:
-            theta_a = 3. * np.pi / 2.
-        if b.x():
-            theta_b = np.arctan(b.y() / b.x())
-        elif b.y() > 0:
-            theta_b = np.pi / 2.
-        else:
-            theta_b = 3. * np.pi / 2.
-        '''
         theta_a, theta_b = np.arctan2(a.y(), a.x()), np.arctan2(b.y(), b.x())
         angle = theta_b - theta_a
         if angle:
             for shape in shapes:
                 shape.rotate(angle, center)
             self.prevPoint = pos
+            self.rotatePixmap.emit(-angle)
             return True
         return False
 

@@ -40,21 +40,13 @@ from registerpc.widgets import ZoomWidget
 
 from registerpc.pointcloud.PointCloud import PointCloud
 from registerpc.pointcloud.Voxelize import VoxelGrid
+from registerpc.Room import Room
 
 
 # TODO:
 #   --- BYU students:
-#   Snap to corner
-#   Snap to center
 #   --- Brady:
-#   Create annotations for individual slices ??? (floor, lights, evap. coils)
-#   Interpolate beam positions inside wall bounds or canvas bounds
 #   --- Austin:
-#   //DONE Add distance threshold for snap functions to config file (snapToCenter, snapToCorner, rackSep, rackSplit)
-#   //DONE Draw crosshairs on beams that span the canvas (toggle on/off)
-#   //DONE Toggle individual annotations on/off (turn off SHOWALL)
-#   Create icons for buttons
-#   Create shortcuts
 
 LABEL_COLORMAP = imgviz.label_colormap(value=200)
 
@@ -117,7 +109,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelList = LabelQListWidget()
         self.labelList.itemActivated.connect(self.labelSelectionChanged)
         self.labelList.itemSelectionChanged.connect(self.labelSelectionChanged)
-        self.labelList.itemDoubleClicked.connect(self.toggleIndivPolygon)
         # Connect to itemChanged to detect checkbox changes.
         self.labelList.itemChanged.connect(self.labelItemChanged)
         self.labelList.setDragDropMode(
@@ -149,15 +140,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.fileSearch = QtWidgets.QLineEdit()
         self.fileSearch.setPlaceholderText(self.tr('Search Filename'))
-        self.fileSearch.textChanged.connect(self.fileSearchChanged)
         self.fileListWidget = QtWidgets.QListWidget()
-        self.fileListWidget.itemSelectionChanged.connect(
-            self.fileSelectionChanged
-        )
+        self.fileListWidget.itemSelectionChanged.connect(self.fileSelectionChanged)
         fileListLayout = QtWidgets.QVBoxLayout()
         fileListLayout.setContentsMargins(0, 0, 0, 0)
         fileListLayout.setSpacing(0)
-        fileListLayout.addWidget(self.fileSearch)
+        #fileListLayout.addWidget(self.fileSearch)
         fileListLayout.addWidget(self.fileListWidget)
         self.file_dock = QtWidgets.QDockWidget(self.tr(u'File List'), self)
         self.file_dock.setObjectName(u'Files')
@@ -258,22 +246,6 @@ class MainWindow(QtWidgets.QMainWindow):
                         shortcuts['save_as'],
                         'save-as', self.tr('Save labels to a different file'),
                         enabled=False)
-
-        deleteFile = action(
-            self.tr('&Delete File'),
-            self.deleteFile,
-            shortcuts['delete_file'],
-            'delete',
-            self.tr('Delete current label file'),
-            enabled=False)
-
-        changeOutputDir = action(
-            self.tr('&Change Output Dir'),
-            slot=self.changeOutputDirDialog,
-            shortcut=shortcuts['save_to'],
-            icon='open',
-            tip=self.tr(u'Change where annotations are loaded/saved')
-        )
 
         saveAuto = action(
             text=self.tr('Save &Automatically'),
@@ -446,6 +418,11 @@ class MainWindow(QtWidgets.QMainWindow):
             enabled=False,
         )
 
+        rotate = action(self.tr('Rotate'), self.rotateRoom, None, None, self.tr('Rotate the selected room'), enabled=False)
+
+        translate = action(self.tr('Translate'), self.translateRoom, None, None, self.tr('Translate the selected room'),
+                           enabled=False)
+
         undo = action(self.tr('Undo'), self.undoShapeEdit,
                       shortcuts['undo'], 'undo',
                       self.tr('Undo last add and edit of shape'),
@@ -535,13 +512,18 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelList.customContextMenuRequested.connect(
             self.popLabelListMenu)
 
+        # File list context menu.
+        fileMenu = QtWidgets.QMenu()
+        utils.addActions(fileMenu, (rotate, translate))
+        self.fileListWidget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.fileListWidget.customContextMenuRequested.connect(
+            self.popFileListMenu)
+
         # Store actions for further handling.
         self.actions = utils.struct(
             saveAuto=saveAuto,
             saveWithImageData=saveWithImageData,
-            changeOutputDir=changeOutputDir,
             save=save, saveAs=saveAs, open=open_, close=close,
-            deleteFile=deleteFile,
             toggleKeepPrevMode=toggle_keep_prev_mode,
             delete=delete, edit=edit, copy=copy,
             undoLastPoint=undoLastPoint, undo=undo,
@@ -630,6 +612,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 createPointMode,
                 createLineStripMode,
                 editMode,
+                rotate,
+                translate,
             ),
             onShapesPresent=(saveAs, hideAll, showAll, rotate_rack, merge_racks, break_all_racks, update_annotation,
                              predict_pallets, select_pallets_by_rack, select_pallets_by_group, interpolate_beams),
@@ -649,6 +633,7 @@ class MainWindow(QtWidgets.QMainWindow):
             help=self.menu(self.tr('&Help')),
             recentFiles=QtWidgets.QMenu(self.tr('Open &Recent')),
             labelList=labelMenu,
+            fileListWidget=fileMenu,
         )
 
         utils.addActions(
@@ -661,10 +646,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 save,
                 saveAs,
                 saveAuto,
-                changeOutputDir,
                 saveWithImageData,
                 close,
-                deleteFile,
                 None,
                 quit,
             ),
@@ -719,7 +702,6 @@ class MainWindow(QtWidgets.QMainWindow):
             showNextSlice,
             showLastSlice,
             save,
-            deleteFile,
             None,
             createMode,
             editMode,
@@ -768,39 +750,31 @@ class MainWindow(QtWidgets.QMainWindow):
         self.output_dir = output_dir
 
         # Application state.
-        self.image = QtGui.QImage()
-        self.sourcePath = None
-        self.recentFiles = []
-        self.maxRecent = 7
-        self.otherData = {}
-        self.zoom_level = 100
-        self.fit_window = False
         self.max_points = None
         self.scale = None
         self.thickness = None
         self.offset = None
-        self.annotationMode = None
-        self.imageData = None
-        self.sliceIndices = None
-        self.renderingRacks, self.renderingWalls, self.renderingPallets = True, True, True
-        self.renderingBeams = True,
         self.pointcloud = PointCloud(render=False)
-        self._cur_group = 0
-        self._cur_rack = 0
+        self.filenames = []
+        self.indices = [0]
+        self.labelFiles = []
+        self.sliceIdx = 0
+
+        self.image = QtGui.QImage()
+        self.recentFiles = []
+        self.maxRecent = 7
+        self.otherData = {}
+        self.highlightSliceOnScroll = False
+        self.zoom_level = 100
+        self.fit_window = False
         self.zoom_values = {}  # key=filename, value=(zoom_mode, zoom_value)
         self.scroll_values = {
             Qt.Horizontal: {},
             Qt.Vertical: {},
         }  # key=filename, value=scroll_value
 
-        if filename is not None and osp.isdir(filename):
-            self.importDirImages(filename, load=False)
-        else:
-            self.filename = filename
-
         if config['file_search']:
             self.fileSearch.setText(config['file_search'])
-            self.fileSearchChanged()
 
         # XXX: Could be completely declarative.
         # Restore application settings.
@@ -820,8 +794,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.updateFileMenu()
         # Since loading the file may take some time,
         # make sure it runs in the background.
+        '''
         if self.filename is not None:
-            self.queueEvent(functools.partial(self.loadFile, self.filename))
+            self.queueEvent(functools.partial(self.loadFiles, self.filename))
+        '''
 
         # Callbacks:
         self.zoomWidget.valueChanged.connect(self.paintCanvas)
@@ -883,8 +859,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions.save.setEnabled(True)
         self.actions.undo.setEnabled(self.canvas.isShapeRestorable)
         title = __appname__
-        if self.filename is not None:
-            title = '{} - {}*'.format(title, self.filename)
         self.setWindowTitle(title)
 
     def setClean(self):
@@ -897,14 +871,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.actions.createPointMode.setEnabled(True)
         self.actions.createLineStripMode.setEnabled(True)
         title = __appname__
-        if self.filename is not None:
-            title = '{} - {}'.format(title, self.filename)
         self.setWindowTitle(title)
-
-        if self.hasLabelFile():
-            self.actions.deleteFile.setEnabled(True)
-        else:
-            self.actions.deleteFile.setEnabled(False)
 
     def toggleActions(self, viewer=None, value=True):
         """Enable/Disable widgets which depend on an opened image."""
@@ -931,7 +898,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.image = QtGui.QImage()
         self.labelList.clear()
         self.sliceIdx = 0
-        self.filename = None
         self.sourcePath = None
         self.imageData = None
         self.labelFile = None
@@ -941,7 +907,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.scale = None
         self.offset = None
         self.annotationMode = None
-        self.sliceIndices = None
+        self.slicePointIndices = None
         self.imageData = None
         self.renderingRacks, self.renderingWalls, self.renderingPallets = True, True, True
         self.renderingBeams = True,
@@ -1007,14 +973,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.toggleDrawMode(True)
 
     def updateFileMenu(self):
-        current = self.filename
-
         def exists(filename):
             return osp.exists(str(filename))
 
         menu = self.menus.recentFiles
         menu.clear()
-        files = [f for f in self.recentFiles if f != current and exists(f)]
+        files = [f for f in self.recentFiles if exists(f)]
         for i, f in enumerate(files):
             icon = utils.newIcon('labels')
             action = QtWidgets.QAction(
@@ -1024,6 +988,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def popLabelListMenu(self, point):
         self.menus.labelList.exec_(self.labelList.mapToGlobal(point))
+
+    def popFileListMenu(self, point):
+        self.menus.fileListWidget.exec_(self.fileListWidget.mapToGlobal(point))
 
     def validateLabel(self, label):
         # no validation
@@ -1098,28 +1065,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.toggleDrawMode(False, createMode='line')
         elif label == 'walls':
             self.toggleDrawMode(False, createMode='polygon', showPopup=False)
-
-    def fileSearchChanged(self):
-        self.importDirImages(
-            self.lastOpenDir,
-            pattern=self.fileSearch.text(),
-            load=False,
-        )
-
-    def fileSelectionChanged(self):
-        items = self.fileListWidget.selectedItems()
-        if not items:
-            return
-        item = items[0]
-
-        if not self.mayContinue():
-            return
-
-        currIndex = self.imageList.index(str(item.text()))
-        if currIndex < len(self.imageList):
-            filename = self.imageList[currIndex]
-            if filename:
-                self.loadFile(filename)
 
     # React to canvas signals.
     def shapeSelectionChanged(self, selected_shapes):
@@ -1232,10 +1177,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 rack_id=rack_id,
                 orient=orient
             )
-            if shape.group_id is not None:
-                self._cur_group = max(self._cur_group, shape.group_id)
-            if shape.rack_id is not None:
-                self._cur_rack = max(self._cur_rack, shape.rack_id)
             for p in points:
                 shape.addPoint(self.pointcloudToQpoint(p))
             shape.close()
@@ -1268,6 +1209,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.flag_widget.addItem(item)
 
     def saveLabels(self, filename):
+        # Todo: update this function
         lf = LabelFile()
 
         def format_shape(s):
@@ -1572,14 +1514,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def setScroll(self, orientation, value):
         self.scrollBars[orientation].setValue(value)
-        self.scroll_values[orientation][self.filename] = value
+        self.scroll_values[orientation][self.filenames[0]] = value
 
     def setZoom(self, value):
         self.actions.fitWidth.setChecked(False)
         self.actions.fitWindow.setChecked(False)
         self.zoomMode = self.MANUAL_ZOOM
         self.zoomWidget.setValue(value)
-        self.zoom_values[self.filename] = (self.zoomMode, value)
+        self.zoom_values[self.filenames[0]] = (self.zoomMode, value)
 
     def addZoom(self, increment=1.1):
         self.setZoom(self.zoomWidget.value() * increment)
@@ -1614,7 +1556,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.pointcloud.viewer_is_ready():
             self.toggleActions(viewer=False)
             return
-        self.pointcloud.highlight(self.pointcloud.select(indices=self.sliceIndices[self.sliceIdx],
+        self.pointcloud.highlight(self.pointcloud.select(indices=self.slicePointIndices[self.sliceIdx],
                                                          showing=True, highlighted=False))
 
     def checkHighlightSlice(self):
@@ -1636,63 +1578,46 @@ class MainWindow(QtWidgets.QMainWindow):
         for item, shape in self.labelList.itemsToShapes:
             item.setCheckState(Qt.Checked if value else Qt.Unchecked)
 
-    def toggleIndivPolygon(self, item=None):
-        if item is None:
-            return
-        shape = self.labelList.get_shape_from_item(item)
-        if (self.canvas.getVisible(shape)):
-            self.canvas.setShapeInvisible(shape)
-            #item.setCheckState(Qt.Unchecked)
-        else:
-            self.canvas.setShapeVisible(shape)
-            #item.setCheckState(Qt.Checked)
-        #item.setCheckState(Qt.Checked if item.checkState() == Qt.Unchecked else Qt.Unchecked)
-
-    def loadFile(self, filename):
-        """
-        Clear all information from last open file. Ask the user how many points to load and what mesh size and slice
-        thickness. Load the point cloud data and build slice images from it. If there are existing annotations,
-        load them.
-        """
-        labelfile = filename
-        if filename.endswith('.json'):
-            filename = LabelFile.get_source(filename)
+    def loadFiles(self, filenames):
         self.canvas.setEnabled(False)
-        self.resetState()
 
-        self.sourcePath = filename
-        dialog = OpenFileDialog()
-        if dialog.exec():
-            self.max_points, self.scale, self.thickness = dialog.getInputs()
-        else:
-            return
-        self.lastOpenDir = osp.dirname(filename)
+        if self.max_points is None or self.scale is None or self.thickness is None:
+            dialog = OpenFileDialog()
+            if dialog.exec():
+                self.max_points, self.scale, self.thickness = dialog.getInputs()
+            else:
+                return
+
+        self.rooms = []
+        for filename in filenames:
+            self.rooms.append(Room(filename, self.thickness, self.max_points))
+            self.filenames.append(self.rooms[-1].filename)
+            item = QtWidgets.QListWidgetItem(self.filenames[-1])
+            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            self.fileListWidget.addItem(item)
+        self.lastOpenDir = osp.dirname(self.filenames[-1])
         self.status(self.tr('Loading points from file'))
-        self.loadPointCloud(filename)
         self.status(self.tr('Building pixel maps'))
-        self.buildImageData()
+        self.buildImages()
         self.updatePixmap()
-        self.loadLabelsFile(labelfile)
         self.setZoomAndScroll()
         self.canvas.setEnabled(True)
 
         self.paintCanvas()
-        self.addRecentFile(self.filename)
         self.toggleActions(True)
-        self.status(self.tr("Loaded %s") % osp.basename(str(filename)))
 
     def setZoomAndScroll(self):
         is_initial_load = not self.zoom_values
-        if self.filename in self.zoom_values:
-            self.zoomMode = self.zoom_values[self.filename][0]
-            self.setZoom(self.zoom_values[self.filename][1])
+        if self.filenames[0] in self.zoom_values:
+            self.zoomMode = self.zoom_values[self.filenames[0]][0]
+            self.setZoom(self.zoom_values[self.filenames[0]][1])
         elif is_initial_load or not self._config['keep_prev_scale']:
             self.adjustScale(initial=True)
         # set scroll values
         for orientation in self.scroll_values:
-            if self.filename in self.scroll_values[orientation]:
+            if self.filenames[0] in self.scroll_values[orientation]:
                 self.setScroll(
-                    orientation, self.scroll_values[orientation][self.filename]
+                    orientation, self.scroll_values[orientation][self.filenames[0]]
                 )
 
     def loadPointCloud(self, filename):
@@ -1703,39 +1628,62 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.tr('No such file: <b>%s</b>') % filename
             )
             return False
-        self.filename = str(filename)
         self.pointcloud.load(filename, self.max_points)
+        self.indices.append(len(self.pointcloud))
+        min_point = self.pointcloud.points[['x', 'y', 'z']].values.min(axis=0)
+        self.offset = QtCore.QPointF(min_point[0], min_point[1])
         self.status(self.tr("Loaded %s") % osp.basename(filename))
 
-    def buildImageData(self, scores=None):
-        # Divide the point cloud into horizontal slices with some thickness
-        points = self.pointcloud.points[['x', 'y', 'z']].values
-        min_point, max_point = points.min(axis=0), points.max(axis=0)
+    def sortSlices(self):
+        mesh, offset = (100000., 1000000., self.thickness), (-10000., -10000., 0.0)
+        slices = VoxelGrid(self.pointcloud.points[['x', 'y', 'z']].values, mesh, offset)
+        self.sliceVoxelIndices = np.sort(slices.occupied())
+        self.sliceVoxelIndices = [tuple(x) for x in self.sliceVoxelIndices]
+        self.slicePointIndices = []
+        for v in self.sliceVoxelIndices:
+            self.slicePointIndices.append(slices.indices(v))
+
+    def getAllPoints(self):
+        points = np.empty((0, 3))
+        for room in self.rooms:
+            points = np.append(points, room.points, axis=0)
+        return points
+
+    def getAllPointsInSlice(self, idx):
+        points = np.empty((0, 3))
+        for room in self.rooms:
+            points = np.append(points, room.slice(idx), axis=0)
+        return points
+
+    def getMinMaxPoints(self):
+        min_point, max_point = np.inf * np.ones(3), -np.inf * np.ones(3)
+        for room in self.rooms:
+            min_point, max_point = np.min([min_point, room.min_point], axis=0), np.max([max_point, room.max_point], axis=0)
+        return min_point, max_point
+
+    def getMinMaxSlice(self):
+        min_slice, max_slice = np.inf, -np.inf
+        for room in self.rooms:
+            min_slice, max_slice = min(min_slice, room.min_slice), max(max_slice, room.max_slice)
+        return min_slice, max_slice
+
+    def buildImages(self):
+        min_point, max_point = self.getMinMaxPoints()
         min_idx, max_idx = (min_point / self.scale).astype(int), (max_point / self.scale).astype(int)
-        slices = VoxelGrid(points, (10000., 10000., self.thickness))
         self.offset = QtCore.QPointF(min_point[0], min_point[1])
-        # Create bitmaps (2D rectangular integer arrays) from the slices
         bitmaps = []
-        self.sliceIndices = []
-        self.status(self.tr('Building bitmaps from point cloud'))
-        sliceList = slices.all()
-        size = len(sliceList)
-        for v in tqdm(slices.all(), desc='Building bitmaps from point cloud'):
-            index = sliceList.index(v)
-            percent = (index / size) * 100
+        #self.status(self.tr('Building bitmaps from point cloud'))
+        #size = len(self.sliceVoxelIndices)
+        min_slice, max_slice = self.getMinMaxSlice()
+        for i in range(min_slice, max_slice + 1):
+            '''
+            percent = (i / size) * 100
             self.progressBar.setValue(percent)
-            if not len(slices.indices(v)):
-                continue
-            self.sliceIndices.append(slices.indices(v))
-            vg = VoxelGrid(self.pointcloud.points.loc[self.sliceIndices[-1]][['x', 'y', 'z']].values,
-                           (self.scale, self.scale, max_point[2] + self.thickness / 2.0))
-            if scores is not None:
-                cur_scores = scores[self.sliceIndices[-1]]
-            else:
-                cur_scores = None
-            bitmaps.append(vg.bitmapFromSlice(max=255, scores=cur_scores, min_idx=min_idx, max_idx=max_idx))
+            '''
+            vg = VoxelGrid(self.getAllPointsInSlice(i), (self.scale, self.scale, max_point[2] + self.thickness / 2.0))
+            bitmaps.append(vg.bitmapFromSlice(max=255, min_idx=min_idx, max_idx=max_idx))
         # Create images from numpy arrays
-        self.imageData = []
+        self.images, self.pixmaps = [], []
         self.progressBar.reset()
         # Todo: show progress in progress bar here? investigate why it slows things down
         for m in tqdm(bitmaps, desc='Building image data from bitmaps'):
@@ -1743,7 +1691,9 @@ class MainWindow(QtWidgets.QMainWindow):
             buff = BytesIO()
             img.save(buff, format="JPEG")
             buff.seek(0)
-            self.imageData.append(buff.read())
+            image = QtGui.QImage.fromData(buff.read())
+            self.images.append(image)
+            self.pixmaps.append(QtGui.QPixmap.fromImage(image))
 
     def update3dViewer(self, values=None):
         if self.pointcloud.viewer_is_ready():
@@ -1754,14 +1704,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.toggleActions(viewer=False)
 
     def updatePixmap(self, store=True):
-        if not self.imageData:
+        if not self.images:
             return
-        if self.sliceIdx >= len(self.imageData):
+        if self.sliceIdx >= len(self.images):
             self.sliceIdx = 0
         if self.sliceIdx < 0:
-            self.sliceIdx = len(self.imageData) - 1
-        self.image = QtGui.QImage.fromData(self.imageData[self.sliceIdx])
-        self.canvas.loadPixmap(QtGui.QPixmap.fromImage(self.image))
+            self.sliceIdx = len(self.images) - 1
+        self.image = self.images[self.sliceIdx]
+        self.canvas.loadPixmap(self.pixmaps[self.sliceIdx])
         self.canvas.loadShapes(self.labelList.shapes, store=store)
         if self.highlightSliceOnScroll:
             self.highlightSlice()
@@ -1775,7 +1725,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if QtCore.QFile.exists(label_file) and \
                 LabelFile.is_label_file(label_file):
             try:
-                self.labelFile = LabelFile(label_file)
+                self.labelFiles.append(LabelFile(label_file))
             except LabelFileError as e:
                 self.errorMessage(
                     self.tr('Error opening file'),
@@ -1785,11 +1735,14 @@ class MainWindow(QtWidgets.QMainWindow):
                     ) % (e, label_file)
                 )
                 self.status(self.tr("Error reading %s") % label_file)
-                return False
-            self.otherData = self.labelFile.otherData
+                self.labelFiles.append(None)
+            #self.otherData = self.labelFile.otherData
         else:
-            self.labelFile = None
+            self.labelFiles.append(None)
+        if self.labelFiles[-1]:
+            self.loadLabels(self.labelFiles[-1].shapes)
 
+        '''
         if 'roomName' not in self.otherData.keys():
             self.roomNameDialog()
         if self._config['keep_prev']:
@@ -1805,6 +1758,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.setDirty()
         else:
             self.setClean()
+        '''
 
     def resizeEvent(self, event):
         if self.canvas and not self.image.isNull()\
@@ -1822,7 +1776,7 @@ class MainWindow(QtWidgets.QMainWindow):
         value = self.scalers[self.FIT_WINDOW if initial else self.zoomMode]()
         value = int(100 * value)
         self.zoomWidget.setValue(value)
-        self.zoom_values[self.filename] = (self.zoomMode, value)
+        self.zoom_values[self.filenames[0]] = (self.zoomMode, value)
 
     def scaleFitWindow(self):
         """Figure out the size of the pixmap to fit the main widget."""
@@ -1849,7 +1803,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.mayContinue():
             event.ignore()
         self.settings.setValue(
-            'filename', self.filename if self.filename else '')
+            'filename', self.filenames[0] if self.filenames[0] else '')
         self.settings.setValue('window/size', self.size())
         self.settings.setValue('window/position', self.pos())
         self.settings.setValue('window/state', self.saveState())
@@ -2250,7 +2204,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def loadRecent(self, filename):
         if self.mayContinue():
-            self.loadFile(filename)
+            self.loadFiles(filename)
 
     def showNextSlice(self, _value=False):
         self.sliceIdx += 1
@@ -2260,72 +2214,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self.sliceIdx -= 1
         self.updatePixmap(store=False)
 
-    def openFile(self, _value=False):
-        if not self.mayContinue():
-            return
-        path = osp.dirname(str(self.filename)) if self.filename else '.'
-        formats = ['*.{}'.format(fmt.data().decode())
-                   for fmt in QtGui.QImageReader.supportedImageFormats()]
-        filters = self.tr("Image & Label files (%s)") % ' '.join(
-            formats + ['*%s' % LabelFile.suffix])
-        filename = QtWidgets.QFileDialog.getOpenFileName(
-            self, self.tr('%s - Choose Image or Label file') % __appname__,
-            path, filters)
-        if QT5:
-            filename, _ = filename
-        filename = str(filename)
-        if filename:
-            self.loadFile(filename)
-
     def openPointCloud(self, _value=False):
         if not self.mayContinue():
             return
-        path = osp.dirname(str(self.filename)) if self.filename else '.'
+        path = osp.dirname(str(self.filenames[0])) if len(self.filenames) else '.'
         formats = ['*.las', '*.laz', '*.pcd', '*.ply', '*.pts']
         filters = self.tr("Point Cloud files (%s)") % ' '.join(
             formats + ['*%s' % LabelFile.suffix])
-        filename = QtWidgets.QFileDialog.getOpenFileName(
+        filenames, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self, self.tr('%s - Choose Point Cloud file') % __appname__, path, filters)
-        if QT5:
-            filename, _ = filename
-        filename = str(filename)
-        if filename:
-            self.loadFile(filename)
-
-    def changeOutputDirDialog(self, _value=False):
-        default_output_dir = self.output_dir
-        if default_output_dir is None and self.filename:
-            default_output_dir = osp.dirname(self.filename)
-        if default_output_dir is None:
-            default_output_dir = self.currentPath()
-
-        output_dir = QtWidgets.QFileDialog.getExistingDirectory(
-            self,
-            self.tr('%s - Save/Load Annotations in Directory') % __appname__,
-            default_output_dir,
-            QtWidgets.QFileDialog.ShowDirsOnly |
-            QtWidgets.QFileDialog.DontResolveSymlinks,
-        )
-        output_dir = str(output_dir)
-
-        if not output_dir:
-            return
-
-        self.output_dir = output_dir
-
-        self.statusBar().showMessage(
-            self.tr('%s . Annotations will be saved/loaded in %s') %
-            ('Change Annotations Dir', self.output_dir))
-        self.statusBar().show()
-
-        current_filename = self.filename
-        self.importDirImages(self.lastOpenDir, load=False)
-
-        if current_filename in self.imageList:
-            # retain currently selected file
-            self.fileListWidget.setCurrentRow(
-                self.imageList.index(current_filename))
-            self.fileListWidget.repaint()
+        if filenames:
+            self.loadFiles(filenames)
 
     def saveFile(self, _value=False):
         assert not self.image.isNull(), "cannot save empty image"
@@ -2359,7 +2258,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.setAcceptMode(QtWidgets.QFileDialog.AcceptSave)
         dlg.setOption(QtWidgets.QFileDialog.DontConfirmOverwrite, False)
         dlg.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, False)
-        basename = osp.basename(osp.splitext(self.filename)[0])
+        basename = osp.basename(osp.splitext(self.filenames[0])[0])
         if self.output_dir:
             default_labelfile_name = osp.join(
                 self.output_dir, basename + LabelFile.suffix
@@ -2400,32 +2299,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.setEnabled(False)
         self.actions.saveAs.setEnabled(False)
 
-    def getLabelFile(self):
-        if self.filename.lower().endswith('.json'):
-            label_file = self.filename
-        else:
-            label_file = osp.splitext(self.filename)[0] + '.json'
-
-        return label_file
-
-    def deleteFile(self):
-        mb = QtWidgets.QMessageBox
-        msg = self.tr('You are about to permanently delete this label file, '
-                      'proceed anyway?')
-        answer = mb.warning(self, self.tr('Attention'), msg, mb.Yes | mb.No)
-        if answer != mb.Yes:
-            return
-
-        label_file = self.getLabelFile()
-        if osp.exists(label_file):
-            os.remove(label_file)
-            logger.info('Label file is removed: {}'.format(label_file))
-
-            item = self.fileListWidget.currentItem()
-            item.setCheckState(Qt.Unchecked)
-
-            self.resetState()
-
     # Message Dialogs. #
     def hasLabels(self):
         if not self.labelList.itemsToShapes:
@@ -2435,19 +2308,13 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         return True
 
-    def hasLabelFile(self):
-        if self.filename is None:
-            return False
-
-        label_file = self.getLabelFile()
-        return osp.exists(label_file)
-
     def mayContinue(self):
+        # Todo: update this function
         if not self.dirty:
             return True
         mb = QtWidgets.QMessageBox
-        msg = self.tr('Save annotations to "{}" before closing?').format(
-            self.filename)
+        msg = self.tr('Save annotations to "{}" before closing (NOT IMPLEMENTED)?').format(
+            self.filenames[0])
         answer = mb.question(self,
                              self.tr('Save annotations?'),
                              msg,
@@ -2466,7 +2333,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self, title, '<p><b>%s</b></p>%s' % (title, message))
 
     def currentPath(self):
-        return osp.dirname(str(self.filename)) if self.filename else '.'
+        return osp.dirname(str(self.filenames[0])) if self.filenames[0] else '.'
 
     def toggleKeepPrevMode(self):
         self._config['keep_prev'] = not self._config['keep_prev']
@@ -2530,8 +2397,8 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.lastOpenDir and osp.exists(self.lastOpenDir):
             defaultOpenDirPath = self.lastOpenDir
         else:
-            defaultOpenDirPath = osp.dirname(self.filename) \
-                if self.filename else '.'
+            defaultOpenDirPath = osp.dirname(self.filenames[0]) \
+                if self.filenames[0] else '.'
 
         targetDirPath = str(QtWidgets.QFileDialog.getExistingDirectory(
             self,
@@ -2586,33 +2453,6 @@ class MainWindow(QtWidgets.QMainWindow):
             if shape.label == 'noise':
                 noise.append(shape)
         return noise
-
-    def importDirImages(self, dirpath, pattern=None, load=True):
-        self.actions.openNextImg.setEnabled(True)
-        self.actions.openPrevImg.setEnabled(True)
-
-        if not self.mayContinue() or not dirpath:
-            return
-
-        self.lastOpenDir = dirpath
-        self.filename = None
-        self.fileListWidget.clear()
-        for filename in self.scanAllImages(dirpath):
-            if pattern and pattern not in filename:
-                continue
-            label_file = osp.splitext(filename)[0] + '.json'
-            if self.output_dir:
-                label_file_without_path = osp.basename(label_file)
-                label_file = osp.join(self.output_dir, label_file_without_path)
-            item = QtWidgets.QListWidgetItem(filename)
-            item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-            if QtCore.QFile.exists(label_file) and \
-                    LabelFile.is_label_file(label_file):
-                item.setCheckState(Qt.Checked)
-            else:
-                item.setCheckState(Qt.Unchecked)
-            self.fileListWidget.addItem(item)
-        self.openNextImg(load=load)
 
     def scanAllImages(self, folderPath):
         extensions = ['.%s' % fmt.data().decode("ascii").lower()
@@ -2839,3 +2679,28 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             for beam in self.beams:
                 self.canvas.setShapeInvisible(beam)
+
+    def rotateRoom(self):
+        print('rotating room')
+        self.canvas.overrideCursor(QtCore.Qt.OpenHandCursor)
+        self.canvas.rotating = True
+        self.canvas.translating = False
+
+    def translateRoom(self):
+        print('translating room')
+        self.canvas.overrideCursor(QtCore.Qt.CrossCursor)
+        self.canvas.translating = True
+        self.canvas.rotating = False
+
+    def getRoomByFilename(self, filename):
+        for room in self.rooms:
+            if room.filename == filename:
+                return room
+
+    def fileSelectionChanged(self):
+        items = self.fileListWidget.selectedItems()
+        rooms = []
+        for item in items:
+            rooms.append(self.getRoomByFilename(item.text()))
+        self.canvas.selectedRooms = rooms
+
