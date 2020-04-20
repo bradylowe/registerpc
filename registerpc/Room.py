@@ -1,15 +1,18 @@
 
 from registerpc.pointcloud.PointCloud import PointCloud
+from registerpc.pointcloud.Voxelize import VoxelGrid
 from registerpc.label_file import LabelFile, LabelFileError
-import os.path as osp
-from qtpy import QtCore
+import PIL
+from io import BytesIO
+from tqdm import tqdm
+from qtpy import QtCore, QtGui
 import numpy as np
 from collections import defaultdict
 
 
 class Room:
 
-    def __init__(self, filename, thickness, max_points=None):
+    def __init__(self, filename, mesh, thickness, max_points=None):
         filename = str(filename)
         if max_points is None:
             max_points = 1000000000
@@ -19,11 +22,13 @@ class Room:
         else:
             self.filename = filename
             self.labelFilename = '.'.join(self.filename.split('.')[:-1] + ['json'])
+        self.mesh, self.thickness = mesh, thickness
         self.pointcloud = PointCloud(self.filename, max_points=max_points, render=False)
         self.annotations = LabelFile(self.labelFilename)
         points = self.pointcloud.points[['x', 'y', 'z']].values
         self.min_point, self.max_point = points.min(axis=0), points.max(axis=0)
-        self.thickness = thickness
+        self.min_idx, self.max_idx = (self.min_point / self.mesh).astype(int), (self.max_point / self.mesh).astype(int)
+        self.offset = QtCore.QPointF(self.min_point[0], self.min_point[1])
         self.min_slice, self.max_slice = int(self.min_point[2] / thickness) - 1, int(self.max_point[2] / thickness)
         self.slices = defaultdict(list)
         for idx in range(self.min_slice, self.max_slice + 1):
@@ -55,6 +60,15 @@ class Room:
     def save(self, pointFile, labelFile, shapes, otherData=None):
         self.pointcloud.write(pointFile, overwrite=True)
         self.annotations.save(labelFile, shapes, pointFile, otherData)
+
+    def buildImage(self, idx):
+        vg = VoxelGrid(self.slice(idx), (self.mesh, self.mesh, 100000.), (0.0, 0.0, -10000.))
+        bitmap = vg.bitmapFromSlice(max=255, min_idx=self.min_idx, max_idx=self.max_idx)
+        img = PIL.Image.fromarray(np.asarray(bitmap, dtype="uint8"))
+        buff = BytesIO()
+        img.save(buff, format="JPEG")
+        buff.seek(0)
+        return QtGui.QImage.fromData(buff.read())
 
     @property
     def points(self):
