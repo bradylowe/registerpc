@@ -11,7 +11,7 @@ import qimage2ndarray
 
 class Room:
 
-    def __init__(self, filename, mesh, thickness, max_points=None):
+    def __init__(self, filename, index, mesh, thickness, max_points=None):
         filename = str(filename)
         if max_points is None:
             max_points = 1000000000
@@ -24,16 +24,19 @@ class Room:
         self.mesh, self.thickness = mesh, thickness
         self.pointcloud = PointCloud(self.filename, max_points=max_points, render=False)
         self.annotations = LabelFile(self.labelFilename)
+        self.index = index
         points = self.pointcloud.points[['x', 'y', 'z']].values
         self.min_point, self.max_point = points.min(axis=0), points.max(axis=0)
         self.min_idx, self.max_idx = (self.min_point / self.mesh).astype(int), (self.max_point / self.mesh).astype(int)
         self.min_slice, self.max_slice = int(self.min_point[2] / thickness) - 1, int(self.max_point[2] / thickness)
         self.offset = QtCore.QPointF(self.min_point[0], self.min_point[1])
         self.slices = defaultdict(list)
+        self.images = defaultdict(QtGui.QImage)
         for idx in range(self.min_slice, self.max_slice + 1):
             vals = self.pointcloud.points['z']
             keep = np.where(np.logical_and(idx * thickness <= vals, vals < (idx + 1) * thickness))
             self.slices[idx] = self.pointcloud.points.index[keep].tolist()
+            self.images[idx] = self.buildImage(idx)
 
     def rotate(self, angle, center=None, indices=None):
         if center is None:
@@ -83,7 +86,7 @@ class Room:
         image = qimage2ndarray.array2qimage(bitmap)
         imview = qimage2ndarray.rgb_view(image)
         imview[:, :, 1] = 0
-        return image
+        self.images[idx] = image
 
     @property
     def points(self):
