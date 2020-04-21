@@ -210,7 +210,7 @@ class VoxelGrid:
         max_idx = self.index(self.max_corner())
         return [(i, j, k) for i in range(min_idx[0], max_idx[0]+1) for j in range(min_idx[1], max_idx[1]+1) for k in range(min_idx[2], max_idx[2]+1)]
 
-    def bitmapFromSlice(self, max=None, scores=None, min_idx=None, max_idx=None):
+    def bitmapFromSlice(self, max=None, scores=None, min_idx=None, max_idx=None, color='black'):
         """
         Return an array of integers indicating the number of points in each voxel in the grid. This array is
         3-dimensional, spanning all the voxels in the grid. If max is not None, then adjust the values in the
@@ -223,17 +223,26 @@ class VoxelGrid:
         if max_idx is None:
             max_idx = np.array(self.index(self.max_corner()))
         range_idx = max_idx - min_idx + 1
-        bitmap = np.zeros(range_idx[:2], dtype=int)
+        bitmap = np.zeros((range_idx[0], range_idx[1], 4), dtype=int)
+        colors = {
+            'black': 3,
+            'red': [0, 3],
+            'green': [1, 3],
+            'blue': [2, 3],
+            'magenta': [0, 2, 3],
+            'cyan': [1, 2, 3],
+            'yellow': [0, 1, 3]
+        }
         if scores is None:
             for v in self.occupied():
                 i, j, _ = np.array(v) - min_idx
                 #bitmap[i][range_idx[1] - j - 1] = self.counts(v)
-                bitmap[i][range_idx[1] - j - 1] = max
+                bitmap[i][range_idx[1] - j - 1][colors[color]] = max
         else:
             for v in self.occupied():
                 i, j, k = np.array(v) - min_idx
                 bitmap[i][range_idx[1] - j - 1] = np.average(scores[self.indices(v)])
-        return np.swapaxes(bitmap, 0, 1)
+        return np.swapaxes(bitmap, 0, 1).astype('uint8')
 
     def bitmap3d(self, max=None, swapaxes=True, scores=None):
         """
