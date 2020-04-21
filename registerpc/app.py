@@ -586,14 +586,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def setScroll(self, orientation, value):
         self.scrollBars[orientation].setValue(value)
-        self.scroll_values[orientation][self.filenames[0]] = value
+        self.scroll_values[orientation][self.rooms[0].filename] = value
 
     def setZoom(self, value):
         self.actions.fitWidth.setChecked(False)
         self.actions.fitWindow.setChecked(False)
         self.zoomMode = self.MANUAL_ZOOM
         self.zoomWidget.setValue(value)
-        self.zoom_values[self.filenames[0]] = (self.zoomMode, value)
+        self.zoom_values[self.rooms[0].filename] = (self.zoomMode, value)
 
     def addZoom(self, increment=1.1):
         self.setZoom(self.zoomWidget.value() * increment)
@@ -650,12 +650,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rooms = []
         for i, filename in enumerate(filenames):
             self.rooms.append(Room(filename, i, self.mesh, self.thickness, self.max_points))
-            self.filenames.append(self.rooms[-1].filename)
-            item = QtWidgets.QListWidgetItem(self.filenames[-1])
+            item = QtWidgets.QListWidgetItem(self.rooms[-1].filename)
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.fileListWidget.addItem(item)
         self.minSliceIdx, self.maxSliceIdx = self.getMinMaxSliceIdx()
-        self.lastOpenDir = osp.dirname(self.filenames[-1])
+        self.lastOpenDir = osp.dirname(self.rooms[-1].filename)
         self.status(self.tr('Loading points from file'))
         self.status(self.tr('Building pixel maps'))
         self.updatePixmap()
@@ -667,16 +666,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def setZoomAndScroll(self):
         is_initial_load = not self.zoom_values
-        if self.filenames[0] in self.zoom_values:
-            self.zoomMode = self.zoom_values[self.filenames[0]][0]
-            self.setZoom(self.zoom_values[self.filenames[0]][1])
+        if self.rooms[0].filename in self.zoom_values:
+            self.zoomMode = self.zoom_values[self.rooms[0].filename][0]
+            self.setZoom(self.zoom_values[self.rooms[0].filename][1])
         elif is_initial_load or not self._config['keep_prev_scale']:
             self.adjustScale(initial=True)
         # set scroll values
         for orientation in self.scroll_values:
-            if self.filenames[0] in self.scroll_values[orientation]:
+            if self.rooms[0].filename in self.scroll_values[orientation]:
                 self.setScroll(
-                    orientation, self.scroll_values[orientation][self.filenames[0]]
+                    orientation, self.scroll_values[orientation][self.rooms[0].filename]
                 )
 
     def updatePixmap(self, store=True):
@@ -704,7 +703,7 @@ class MainWindow(QtWidgets.QMainWindow):
         value = self.scalers[self.FIT_WINDOW if initial else self.zoomMode]()
         value = int(100 * value)
         self.zoomWidget.setValue(value)
-        self.zoom_values[self.filenames[0]] = (self.zoomMode, value)
+        self.zoom_values[self.rooms[0].filename] = (self.zoomMode, value)
 
     def scaleFitWindow(self):
         """Figure out the size of the pixmap to fit the main widget."""
@@ -727,8 +726,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def closeEvent(self, event):
         if not self.mayContinue():
             event.ignore()
-        self.settings.setValue(
-            'filename', self.filenames[0] if self.filenames[0] else '')
+        self.settings.setValue('filename', '')
         self.settings.setValue('window/size', self.size())
         self.settings.setValue('window/position', self.pos())
         self.settings.setValue('window/state', self.saveState())
@@ -768,12 +766,11 @@ class MainWindow(QtWidgets.QMainWindow):
     def openPointCloud(self, _value=False):
         if not self.mayContinue():
             return
-        path = osp.dirname(str(self.filenames[0])) if len(self.filenames) else '.'
         formats = ['*.las', '*.laz', '*.pcd', '*.ply', '*.pts']
         filters = self.tr("Point Cloud files (%s)") % ' '.join(
             formats + ['*%s' % LabelFile.suffix])
         filenames, _ = QtWidgets.QFileDialog.getOpenFileNames(
-            self, self.tr('%s - Choose Point Cloud file') % __appname__, path, filters)
+            self, self.tr('%s - Choose Point Cloud file') % __appname__, '.', filters)
         if filenames:
             self.loadFiles(filenames)
 
@@ -809,7 +806,7 @@ class MainWindow(QtWidgets.QMainWindow):
         dlg.setAcceptMode(QtWidgets.QFileDialog.AcceptSave)
         dlg.setOption(QtWidgets.QFileDialog.DontConfirmOverwrite, False)
         dlg.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, False)
-        basename = osp.basename(osp.splitext(self.filenames[0])[0])
+        basename = osp.basename(osp.splitext(self.rooms[0].filename)[0])
         if self.output_dir:
             default_labelfile_name = osp.join(
                 self.output_dir, basename + LabelFile.suffix
@@ -855,7 +852,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return True
         mb = QtWidgets.QMessageBox
         msg = self.tr('Save annotations to "{}" before closing (NOT IMPLEMENTED)?').format(
-            self.filenames[0])
+            self.rooms[0].filename)
         answer = mb.question(self,
                              self.tr('Save annotations?'),
                              msg,
@@ -874,7 +871,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self, title, '<p><b>%s</b></p>%s' % (title, message))
 
     def currentPath(self):
-        return osp.dirname(str(self.filenames[0])) if self.filenames[0] else '.'
+        return '.'
 
     def rotateRoom(self):
         print('rotating room')
