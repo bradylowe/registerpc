@@ -181,6 +181,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.rackChanged.connect(self.finalizeRack)
         self.canvas.beamChanged.connect(self.finalizeBeam)
         self.canvas.rotateRack.connect(self.rotateRack)
+        self.canvas.roomChanged.connect(self.roomChanged)
 
         self.setCentralWidget(scrollArea)
 
@@ -751,7 +752,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Application state.
         self.max_points = None
-        self.scale = None
+        self.mesh = None
         self.thickness = None
         self.offset = None
         self.pointcloud = PointCloud(render=False)
@@ -904,7 +905,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.otherData = {}
         self.max_points = None
         self.thickness = None
-        self.scale = None
+        self.mesh = None
         self.offset = None
         self.annotationMode = None
         self.slicePointIndices = None
@@ -1417,16 +1418,16 @@ class MainWindow(QtWidgets.QMainWindow):
         front_dist, back_dist = 2.0, 0.2
         if not rack.orient % 2 and rack.points[0].x() < beam.points[0].x() < rack.points[1].x():
             if rack.orient == 0:
-                max_y, min_y = rack.points[0].y() + back_dist / self.scale, rack.points[1].y() - front_dist / self.scale
+                max_y, min_y = rack.points[0].y() + back_dist / self.mesh, rack.points[1].y() - front_dist / self.mesh
             else:
-                max_y, min_y = rack.points[0].y() + front_dist / self.scale, rack.points[1].y() - back_dist / self.scale
+                max_y, min_y = rack.points[0].y() + front_dist / self.mesh, rack.points[1].y() - back_dist / self.mesh
             if min_y < beam.points[0].y() < max_y:
                 return True, beam.points[0].x(), 0
         elif rack.orient % 2 and rack.points[1].y() < beam.points[0].y() < rack.points[0].y():
             if rack.orient == 1:
-                min_x, max_x = rack.points[0].x() - back_dist / self.scale, rack.points[1].x() + front_dist / self.scale
+                min_x, max_x = rack.points[0].x() - back_dist / self.mesh, rack.points[1].x() + front_dist / self.mesh
             else:
-                min_x, max_x = rack.points[0].x() - front_dist / self.scale, rack.points[1].x() + back_dist / self.scale
+                min_x, max_x = rack.points[0].x() - front_dist / self.mesh, rack.points[1].x() + back_dist / self.mesh
             if min_x < beam.points[0].x() < max_x:
                 return True, beam.points[0].y(), 1
         return False, None, None
@@ -1434,13 +1435,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def rackOrientation(self, rack):
         # If rack is near canvas edge
         center = (rack.points[0] + rack.points[1]) / 2.0
-        if center.x() - 4.0 / self.scale < 0.0:
+        if center.x() - 4.0 / self.mesh < 0.0:
             return 1
-        elif center.y() + 4.0 / self.scale > self.canvas.height():
+        elif center.y() + 4.0 / self.mesh > self.canvas.height():
             return 0
-        elif center.x() + 4.0 / self.scale > self.canvas.width():
+        elif center.x() + 4.0 / self.mesh > self.canvas.width():
             return 3
-        elif center.y() - 4.0 / self.scale < 0.0:
+        elif center.y() - 4.0 / self.mesh < 0.0:
             return 2
         box = np.array([self.qpointToPointcloud(rack.points[0]), self.qpointToPointcloud(rack.points[1])])
         walls = self.walls
@@ -1556,8 +1557,9 @@ class MainWindow(QtWidgets.QMainWindow):
         if not self.pointcloud.viewer_is_ready():
             self.toggleActions(viewer=False)
             return
-        self.pointcloud.highlight(self.pointcloud.select(indices=self.slicePointIndices[self.sliceIdx],
-                                                         showing=True, highlighted=False))
+        # Todo: fix this (sliceIdx)
+        #self.pointcloud.highlight(self.pointcloud.select(indices=self.slicePointIndices[self.sliceIdx],
+        #                                                 showing=True, highlighted=False))
 
     def checkHighlightSlice(self):
         self.highlightSliceOnScroll = True
@@ -1581,24 +1583,25 @@ class MainWindow(QtWidgets.QMainWindow):
     def loadFiles(self, filenames):
         self.canvas.setEnabled(False)
 
-        if self.max_points is None or self.scale is None or self.thickness is None:
+        if self.max_points is None or self.mesh is None or self.thickness is None:
             dialog = OpenFileDialog()
             if dialog.exec():
-                self.max_points, self.scale, self.thickness = dialog.getInputs()
+                self.max_points, self.mesh, self.thickness = dialog.getInputs()
             else:
                 return
 
         self.rooms = []
         for filename in filenames:
-            self.rooms.append(Room(filename, self.thickness, self.max_points))
+            self.rooms.append(Room(filename, self.mesh, self.thickness, self.max_points))
             self.filenames.append(self.rooms[-1].filename)
             item = QtWidgets.QListWidgetItem(self.filenames[-1])
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.fileListWidget.addItem(item)
+        self.minSliceIdx, self.maxSliceIdx = self.getMinMaxSliceIdx()
         self.lastOpenDir = osp.dirname(self.filenames[-1])
         self.status(self.tr('Loading points from file'))
         self.status(self.tr('Building pixel maps'))
-        self.buildImages()
+        #self.buildImages()
         self.updatePixmap()
         self.setZoomAndScroll()
         self.canvas.setEnabled(True)
@@ -1669,7 +1672,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def buildImages(self):
         min_point, max_point = self.getMinMaxPoints()
-        min_idx, max_idx = (min_point / self.scale).astype(int), (max_point / self.scale).astype(int)
+        min_idx, max_idx = (min_point / self.mesh).astype(int), (max_point / self.mesh).astype(int)
         self.offset = QtCore.QPointF(min_point[0], min_point[1])
         bitmaps = []
         #self.status(self.tr('Building bitmaps from point cloud'))
@@ -1680,7 +1683,7 @@ class MainWindow(QtWidgets.QMainWindow):
             percent = (i / size) * 100
             self.progressBar.setValue(percent)
             '''
-            vg = VoxelGrid(self.getAllPointsInSlice(i), (self.scale, self.scale, max_point[2] + self.thickness / 2.0))
+            vg = VoxelGrid(self.getAllPointsInSlice(i), (self.mesh, self.mesh, max_point[2] + self.thickness / 2.0))
             bitmaps.append(vg.bitmapFromSlice(max=255, min_idx=min_idx, max_idx=max_idx))
         # Create images from numpy arrays
         self.images, self.pixmaps = [], []
@@ -1704,14 +1707,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.toggleActions(viewer=False)
 
     def updatePixmap(self, store=True):
-        if not self.images:
+        if not self.image:
             return
-        if self.sliceIdx >= len(self.images):
-            self.sliceIdx = 0
-        if self.sliceIdx < 0:
-            self.sliceIdx = len(self.images) - 1
-        self.image = self.images[self.sliceIdx]
-        self.canvas.loadPixmap(self.pixmaps[self.sliceIdx])
+        if self.sliceIdx > self.maxSliceIdx:
+            self.sliceIdx = self.minSliceIdx
+        if self.sliceIdx < self.minSliceIdx:
+            self.sliceIdx = self.maxSliceIdx
+        self.image = self.rooms[0].buildImage(self.sliceIdx)
+        self.canvas.loadPixmap(QtGui.QPixmap.fromImage(self.image))
         self.canvas.loadShapes(self.labelList.shapes, store=store)
         if self.highlightSliceOnScroll:
             self.highlightSlice()
@@ -1833,7 +1836,7 @@ class MainWindow(QtWidgets.QMainWindow):
         lines nearby, return False along with the original point location. If there is a horizontal and/or vertical
         beam crosshair line nearby, return True with the coordinates of the nearby lines.
         """
-        threshold = threshold / self.scale
+        threshold = threshold / self.mesh
         beams = []
         for item, shape in self.labelList.itemsToShapes:
             if shape.label == 'beam':
@@ -2186,12 +2189,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pointcloud.render()
 
     def qpointToPointcloud(self, p):
-        return (p.x() * self.scale + self.offset.x(),
-                (self.canvas.pixmap.height() - p.y()) * self.scale + self.offset.y())
+        return (p.x() * self.mesh + self.offset.x(),
+                (self.canvas.pixmap.height() - p.y()) * self.mesh + self.offset.y())
 
     def pointcloudToQpoint(self, p):
-        x = (p[0] - self.offset.x()) / self.scale
-        y = self.canvas.pixmap.height() - ((p[1] - self.offset.y()) / self.scale)
+        x = (p[0] - self.offset.x()) / self.mesh
+        y = self.canvas.pixmap.height() - ((p[1] - self.offset.y()) / self.mesh)
         return QtCore.QPointF(x, y)
 
     def highlightWalls(self):
@@ -2692,10 +2695,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.translating = True
         self.canvas.rotating = False
 
-    def getRoomByFilename(self, filename):
-        for room in self.rooms:
+    def getRoomByFilename(self, filename, return_index=False):
+        for i, room in enumerate(self.rooms):
             if room.filename == filename:
-                return room
+                if return_index:
+                    return i, room
+                else:
+                    return room
 
     def fileSelectionChanged(self):
         items = self.fileListWidget.selectedItems()
@@ -2704,3 +2710,12 @@ class MainWindow(QtWidgets.QMainWindow):
             rooms.append(self.getRoomByFilename(item.text()))
         self.canvas.selectedRooms = rooms
 
+    def roomChanged(self, filename):
+        roomIdx, room = self.getRoomByFilename(filename, return_index=True)
+        self.images[roomIdx] = room.buildImage(self.sliceIdx)
+
+    def getMinMaxSliceIdx(self):
+        min_idx, max_idx = np.inf, -np.inf
+        for room in self.rooms:
+            min_idx, max_idx = min(min_idx, room.min_idx[2]), max(max_idx, room.max_idx[2])
+        return min_idx, max_idx
