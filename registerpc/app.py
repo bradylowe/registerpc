@@ -168,8 +168,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.canvas.nextSliceRequest.connect(self.showNextSlice)
         self.canvas.lastSliceRequest.connect(self.showLastSlice)
 
-        self.canvas.shapeMoved.connect(self.setDirty)
-        self.canvas.roomChanged.connect(self.roomChanged)
+        self.canvas.roomRotated.connect(self.roomRotated)
+        self.canvas.roomTranslated.connect(self.roomTranslated)
 
         self.setCentralWidget(scrollArea)
 
@@ -679,14 +679,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 )
 
     def updatePixmap(self, store=True):
+        if not self.rooms:
+            return
         if self.sliceIdx > self.maxSliceIdx:
             self.sliceIdx = self.minSliceIdx
         if self.sliceIdx < self.minSliceIdx:
             self.sliceIdx = self.maxSliceIdx
-        self.canvas.loadPixmaps(self.getPixmaps())
-        self.canvas.loadShapes(self.labelList.shapes, store=store)
-        if self.highlightSliceOnScroll:
-            self.highlightSlice()
+        self.canvas.loadPixmaps(self.getPixmaps(), self.getPixmapOffsets())
+        #self.canvas.loadShapes(self.labelList.shapes, store=store)
 
     def resizeEvent(self, event):
         if self.canvas and self.rooms and self.zoomMode != self.MANUAL_ZOOM:
@@ -713,15 +713,15 @@ class MainWindow(QtWidgets.QMainWindow):
         h1 = self.centralWidget().height() - e
         a1 = w1 / h1
         # Calculate a new scale value based on the pixmap's aspect ratio.
-        w2 = self.canvas.pixmaps.width() - 0.0
-        h2 = self.canvas.pixmaps.height() - 0.0
+        w2 = self.canvas.boundingPixmap.width() - 0.0
+        h2 = self.canvas.boundingPixmap.height() - 0.0
         a2 = w2 / h2
         return w1 / w2 if a2 >= a1 else h1 / h2
 
     def scaleFitWidth(self):
         # The epsilon does not seem to work too well here.
         w = self.centralWidget().width() - 2.0
-        return w / self.canvas.pixmaps.width()
+        return w / self.canvas.boundingPixmap.width()
 
     def closeEvent(self, event):
         if not self.mayContinue():
@@ -742,11 +742,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def qpointToPointcloud(self, p):
         return (p.x() * self.mesh + self.offset.x(),
-                (self.canvas.pixmaps.height() - p.y()) * self.mesh + self.offset.y())
+                (self.canvas.boundingPixmap.height() - p.y()) * self.mesh + self.offset.y())
 
     def pointcloudToQpoint(self, p):
         x = (p[0] - self.offset.x()) / self.mesh
-        y = self.canvas.pixmaps.height() - ((p[1] - self.offset.y()) / self.mesh)
+        y = self.canvas.boundingPixmap.height() - ((p[1] - self.offset.y()) / self.mesh)
         return QtCore.QPointF(x, y)
 
     # User Dialogs #
@@ -906,3 +906,21 @@ class MainWindow(QtWidgets.QMainWindow):
         for room in self.rooms:
             min_idx, max_idx = min(min_idx, room.min_idx[2]), max(max_idx, room.max_idx[2])
         return min_idx, max_idx
+
+    def getPixmaps(self):
+        pixmaps = []
+        for room in self.rooms:
+            pixmaps.append(QtGui.QPixmap.fromImage(room.images[self.sliceIdx]))
+        return pixmaps
+
+    def getPixmapOffsets(self):
+        offsets = []
+        for room in self.rooms:
+            offsets.append(room.min_point / room.mesh)
+        return offsets
+
+    def roomRotated(self, idx, angle):
+        print('room rotated')
+
+    def roomTranslated(self, idx, dx, dy):
+        print('room translated')
