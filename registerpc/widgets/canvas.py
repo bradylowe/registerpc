@@ -76,10 +76,10 @@ class Canvas(QtWidgets.QWidget):
         self.offsets = QtCore.QPoint(), QtCore.QPoint()
         self.scale = 1.0
         self.boundingPixmap = QtGui.QPixmap()
-        self.pixmaps = []
-        self.pixmapOffsets = []
-        self.imageRotation = []
-        self.imageTranslation = []
+        self.images = []
+        self.imageOffsets = []
+        self.imageRotations = []
+        self.imageTranslations = []
         self.roomIdx = None
         self.visible = {}
         self._hideBackround = False
@@ -388,10 +388,10 @@ class Canvas(QtWidgets.QWidget):
             pos = self.transformPos(ev.localPos())
         else:
             pos = self.transformPos(ev.posF())
-        if ev.button() == QtCore.Qt.LeftButton and self.roomIdx and self.imageTranslation[self.roomIdx]:
-            self.roomTranslated.emit(self.roomIdx, self.imageTranslation[self.roomIdx])
-        if ev.button() == QtCore.Qt.RightButton and self.roomIdx and self.imageRotation[self.roomIdx]:
-            self.roomRotated.emit(self.roomIdx, self.imageRotation[self.roomIdx])
+        if ev.button() == QtCore.Qt.LeftButton and self.roomIdx and self.imageTranslations[self.roomIdx]:
+            self.roomTranslated.emit(self.roomIdx, self.imageTranslations[self.roomIdx])
+        if ev.button() == QtCore.Qt.RightButton and self.roomIdx and self.imageRotations[self.roomIdx]:
+            self.roomRotated.emit(self.roomIdx, self.imageRotations[self.roomIdx])
             '''
             menu = self.menus[len(self.selectedShapesCopy) > 0]
             self.restoreCursor()
@@ -597,7 +597,7 @@ class Canvas(QtWidgets.QWidget):
             self.boundedMoveShapes(shapes, point + offset)
 
     def paintEvent(self, event):
-        if not self.pixmaps:
+        if not self.images:
             return super(Canvas, self).paintEvent(event)
 
         p = self._painter
@@ -609,8 +609,10 @@ class Canvas(QtWidgets.QWidget):
         p.scale(self.scale, self.scale)
         p.translate(self.offsetToCenter())
 
-        for pixmap, offset in zip(self.pixmaps, self.pixmapOffsets):
-            p.drawPixmap(offset[0], self.boundingPixmap.height() - offset[1] - pixmap.height(), pixmap)
+        for image, offset in zip(self.images, self.imageOffsets):
+            x, y = offset[0], self.boundingPixmap.height() - offset[1] - image.height()
+            p.drawPixmap(x, y, QtGui.QPixmap.fromImage(image))
+
         Shape.scale = self.scale
         for shape in self.shapes:
             if (shape.selected or not self._hideBackround) and \
@@ -814,13 +816,15 @@ class Canvas(QtWidgets.QWidget):
             self.drawingPolygon.emit(False)
         self.repaint()
 
-    def loadPixmaps(self, pixmaps, offsets):
-        self.pixmaps = pixmaps
-        self.pixmapOffsets = offsets
+    def loadImages(self, images, offsets):
+        self.images = images
+        self.imageOffsets = offsets
+        self.imageRotations = [0.0] * len(self.images)
+        self.imageTranslations = [(0.0, 0.0)] * len(self.images)
         min_x, min_y, max_x, max_y = np.inf, np.inf, -np.inf, -np.inf
-        for pixmap, offset in zip(pixmaps, offsets):
+        for image, offset in zip(images, offsets):
             min_x, min_y = min(min_x, offset[0]), min(min_y, offset[1])
-            max_x, max_y = max(max_x, offset[0] + pixmap.width()), max(max_y, offset[1] + pixmap.height())
+            max_x, max_y = max(max_x, offset[0] + image.width()), max(max_y, offset[1] + image.height())
         self.boundingPixmap = QtGui.QPixmap(max_x - min_x, max_y - min_y)
         self.shapes = []
         self.repaint()
@@ -859,7 +863,10 @@ class Canvas(QtWidgets.QWidget):
 
     def resetState(self):
         self.restoreCursor()
-        self.pixmaps = None
+        self.images = []
+        self.imageOffsets = []
+        self.imageRotations = []
+        self.imageTranslations = []
         self.boundingPixmap = QtGui.QPixmap()
         self.shapesBackups = []
         self.update()

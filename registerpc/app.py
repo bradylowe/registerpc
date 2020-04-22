@@ -685,7 +685,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.sliceIdx = self.minSliceIdx
         if self.sliceIdx < self.minSliceIdx:
             self.sliceIdx = self.maxSliceIdx
-        self.canvas.loadPixmaps(self.getPixmaps(), self.getPixmapOffsets())
+        self.canvas.loadImages(self.getImages(), self.getImageOffsets())
         #self.canvas.loadShapes(self.labelList.shapes, store=store)
 
     def resizeEvent(self, event):
@@ -907,13 +907,13 @@ class MainWindow(QtWidgets.QMainWindow):
             min_idx, max_idx = min(min_idx, room.min_idx[2]), max(max_idx, room.max_idx[2])
         return min_idx, max_idx
 
-    def getPixmaps(self):
-        pixmaps = []
+    def getImages(self):
+        images = []
         for room in self.rooms:
-            pixmaps.append(QtGui.QPixmap.fromImage(room.images[self.sliceIdx]))
-        return pixmaps
+            images.append(room.images[self.sliceIdx])
+        return images
 
-    def getPixmapOffsets(self):
+    def getImageOffsets(self):
         offsets = []
         for room in self.rooms:
             offsets.append(room.min_point / room.mesh)
