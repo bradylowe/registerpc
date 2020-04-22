@@ -11,6 +11,9 @@ import qimage2ndarray
 
 class Room:
 
+    colors = ['black', 'red', 'blue', 'green', 'cyan', 'magenta']
+    colors += colors[1:]
+
     def __init__(self, filename, index, mesh, thickness, max_points=None):
         filename = str(filename)
         if max_points is None:
@@ -25,18 +28,23 @@ class Room:
         self.pointcloud = PointCloud(self.filename, max_points=max_points, render=False)
         self.annotations = LabelFile(self.labelFilename)
         self.index = index
+        self.calculateMinMax()
+        self.min_slice, self.max_slice = int(self.min_point[2] / thickness) - 1, int(self.max_point[2] / thickness)
+        self.slices = defaultdict(list)
+        self.images = defaultdict(QtGui.QImage)
+        self.buildImages()
+
+    def calculateMinMax(self):
         points = self.pointcloud.points[['x', 'y', 'z']].values
         self.min_point, self.max_point = points.min(axis=0), points.max(axis=0)
         self.min_idx, self.max_idx = (self.min_point / self.mesh).astype(int), (self.max_point / self.mesh).astype(int)
-        self.min_slice, self.max_slice = int(self.min_point[2] / thickness) - 1, int(self.max_point[2] / thickness)
-        self.offset = QtCore.QPointF(self.min_point[0], self.min_point[1])
-        self.slices = defaultdict(list)
-        self.images = defaultdict(QtGui.QImage)
+
+    def buildImages(self):
         for idx in range(self.min_slice, self.max_slice + 1):
             vals = self.pointcloud.points['z']
-            keep = np.where(np.logical_and(idx * thickness <= vals, vals < (idx + 1) * thickness))
+            keep = np.where(np.logical_and(idx * self.thickness <= vals, vals < (idx + 1) * self.thickness))
             self.slices[idx] = self.pointcloud.points.index[keep].tolist()
-            self.images[idx] = self.buildImage(idx)
+            self.buildImage(idx)
 
     def rotate(self, angle, center=None, indices=None):
         if center is None:
@@ -82,10 +90,8 @@ class Room:
 
     def buildImage(self, idx):
         vg = VoxelGrid(self.slice(idx), (self.mesh, self.mesh, 100000.), (0.0, 0.0, -10000.))
-        bitmap = vg.bitmapFromSlice(max=255, min_idx=self.min_idx, max_idx=self.max_idx)
+        bitmap = vg.bitmapFromSlice(max=255, min_idx=self.min_idx, max_idx=self.max_idx, color=self.colors[self.index])
         image = qimage2ndarray.array2qimage(bitmap)
-        imview = qimage2ndarray.rgb_view(image)
-        imview[:, :, 1] = 0
         self.images[idx] = image
 
     @property
