@@ -478,6 +478,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Callbacks:
         self.zoomWidget.valueChanged.connect(self.paintCanvas)
 
+        self.populateModeActions()
+
         # self.firstStart = True
         # if self.firstStart:
         #    QWhatsThis.enterWhatsThisMode()
@@ -507,6 +509,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dirty = False
         title = __appname__
         self.setWindowTitle(title)
+    
+    def populateModeActions(self):
+        tool = self.actions.tool
+        self.tools.clear()
+        utils.addActions(self.tools, tool)
+        self.canvas.menus[0].clear()
+        
 
     def toggleActions(self, value=True):
         """Enable/Disable widgets which depend on an opened image."""
