@@ -389,9 +389,11 @@ class Canvas(QtWidgets.QWidget):
         else:
             pos = self.transformPos(ev.posF())
         if ev.button() == QtCore.Qt.LeftButton and self.roomIdx and self.imageTranslations[self.roomIdx]:
-            self.roomTranslated.emit(self.roomIdx, self.imageTranslations[self.roomIdx])
+            #self.roomTranslated.emit(self.roomIdx, self.imageTranslations[self.roomIdx])
+            pass
         if ev.button() == QtCore.Qt.RightButton and self.roomIdx and self.imageRotations[self.roomIdx]:
-            self.roomRotated.emit(self.roomIdx, self.imageRotations[self.roomIdx])
+            #self.roomRotated.emit(self.roomIdx, self.imageRotations[self.roomIdx])
+            pass
             '''
             menu = self.menus[len(self.selectedShapesCopy) > 0]
             self.restoreCursor()
@@ -871,5 +873,13 @@ class Canvas(QtWidgets.QWidget):
         self.shapesBackups = []
         self.update()
 
-    def getRoomFromPosition(self):
-        pass
+    def getRoomFromPosition(self, pos):
+        for image, offset in zip(self.images, self.imageOffsets):
+            x, y = offset[0], self.boundingPixmap.height() - offset[1] - image.height()
+            if pos.x() >= x and pos.x() <= x + self.boundingPixmap.width():
+                if pos.y() >= y and pos.y() <= y + self.boundingPixmap.height():
+                    roomIdx = self.images.index(image) + 1
+                    print(roomIdx)
+                    return roomIdx
+            else:
+                return 0
