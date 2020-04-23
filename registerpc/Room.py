@@ -28,58 +28,70 @@ class Room:
         self.pointcloud = PointCloud(self.filename, max_points=max_points, render=False)
         self.annotations = LabelFile(self.labelFilename)
         self.index = index
+        self.min_point, self.max_point, self.min_idx, self.max_idx = None, None, None, None
         self.calculateMinMax()
         self.min_slice, self.max_slice = int(self.min_point[2] / thickness) - 1, int(self.max_point[2] / thickness)
         self.slices = defaultdict(list)
+        for idx in range(self.min_slice, self.max_slice + 1):
+            vals = self.pointcloud.points['z']
+            keep = np.where(np.logical_and(idx * self.thickness <= vals, vals < (idx + 1) * self.thickness))
+            self.slices[idx] = self.pointcloud.points.index[keep].tolist()
         self.images = defaultdict(QtGui.QImage)
         self.buildImages()
 
-    def calculateMinMax(self):
-        points = self.pointcloud.points[['x', 'y', 'z']].values
+    def calculateMinMax(self, idx=None):
+        if idx is None:
+            points = self.pointcloud.points[['x', 'y', 'z']].values
+        else:
+            points = self.slice(idx)
         self.min_point, self.max_point = points.min(axis=0), points.max(axis=0)
         self.min_idx, self.max_idx = (self.min_point / self.mesh).astype(int), (self.max_point / self.mesh).astype(int)
 
     def buildImages(self):
         for idx in range(self.min_slice, self.max_slice + 1):
-            vals = self.pointcloud.points['z']
-            keep = np.where(np.logical_and(idx * self.thickness <= vals, vals < (idx + 1) * self.thickness))
-            self.slices[idx] = self.pointcloud.points.index[keep].tolist()
             self.buildImage(idx)
 
-    def rotate(self, angle, center=None, indices=None):
+    def rotate(self, angle, center=None, idx=None):
         if center is None:
             center = self.center
         self.rotate_annotations(angle, center)
-        self.rotate_points(angle, center, indices)
+        self.rotate_points(angle, center, idx)
 
     def rotate_annotations(self, angle, center):
         pass
 
-    def rotate_points(self, angle, center, indices=None):
-        angle = np.radians(angle)
+    def rotate_points(self, angle, center, idx=None):
         c, s = np.cos(angle), np.sin(angle)
         rot = np.array(((c, s), (-s, c)))
-        if indices is None:
-            self.pointcloud.points[['x', 'y']] -= center
+        if idx is None:
+            self.pointcloud.points[['x', 'y']] -= center[:2]
             self.pointcloud.points[['x', 'y']] = np.dot(self.pointcloud.points[['x', 'y']].values, rot)
-            self.pointcloud.points[['x', 'y']] += center
+            self.pointcloud.points[['x', 'y']] += center[:2]
+            self.calculateMinMax()
+            self.buildImages()
         else:
-            self.pointcloud.points.iloc[indices][['x', 'y']] -= center
+            indices = self.slices[idx]
+            self.pointcloud.points.iloc[indices][['x', 'y']] -= center[:2]
             self.pointcloud.points.iloc[indices][['x', 'y']] = np.dot(self.pointcloud.points.iloc[indices][['x', 'y']].values, rot)
-            self.pointcloud.points.iloc[indices][['x', 'y']] += center
+            self.pointcloud.points.iloc[indices][['x', 'y']] += center[:2]
+            self.calculateMinMax(idx)
+            self.buildImage(idx)
 
-    def translate(self, delta, indices=None):
+    def translate(self, delta, idx=None):
         self.translate_annotations(delta)
-        self.translate_points(delta, indices)
+        self.translate_points(delta, idx)
 
     def translate_annotations(self, delta):
         pass
 
-    def translate_points(self, delta, indices=None):
-        if indices is None:
-            self.pointcloud.points[['x', 'y']] += delta
+    def translate_points(self, delta, idx=None):
+        if idx is None:
+            self.pointcloud.points[['x', 'y']] += delta[:2]
+            self.calculateMinMax()
         else:
-            self.pointcloud.points.loc[indices][['x', 'y']] += delta
+            self.pointcloud.points.loc[self.slices[idx]][['x', 'y']] += delta[:2]
+            self.min_point, self.max_point = self.min_point + delta, self.max_point + delta
+            self.min_idx, self.max_idx = (self.min_point / self.mesh).astype(int), (self.max_point / self.mesh).astype(int)
 
     def slice(self, idx):
         return self.pointcloud.points.iloc[self.slices[idx]][['x', 'y', 'z']].values

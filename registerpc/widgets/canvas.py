@@ -227,19 +227,17 @@ class Canvas(QtWidgets.QWidget):
 
         # Rotating.
         if QtCore.Qt.RightButton & ev.buttons():
-            if self.prevPoint and self.roomIdx:
+            if self.prevPoint and self.roomIdx is not None:
                 self.overrideCursor(CURSOR_ROTATE)
-                self.rotateRoom(self.room, pos)
-                #self.roomChanged.emit(self.room.filename)
+                self.rotateRoom(pos)
                 self.repaint()
             return
 
         # Translating
         if QtCore.Qt.LeftButton & ev.buttons():
-            if self.prevPoint and self.roomIdx:
+            if self.prevPoint and self.roomIdx is not None:
                 self.overrideCursor(CURSOR_MOVE)
-                self.translateRoom(self.room, pos)
-                #self.roomChanged.emit(self.room.filename)
+                self.translateRoom(pos)
                 self.repaint()
             return
 
@@ -339,7 +337,8 @@ class Canvas(QtWidgets.QWidget):
         else:
             pos = self.transformPos(ev.posF())
         if ev.button() == QtCore.Qt.LeftButton:
-            self.roomIdx = self.getRoomFromPosition(pos)
+            #self.roomIdx = self.getRoomFromPosition(pos)
+            self.prevPoint = pos
             return
         if ev.button() == QtCore.Qt.LeftButton:
             if self.drawing():
@@ -388,12 +387,23 @@ class Canvas(QtWidgets.QWidget):
             pos = self.transformPos(ev.localPos())
         else:
             pos = self.transformPos(ev.posF())
+<<<<<<< HEAD
         if ev.button() == QtCore.Qt.LeftButton and self.roomIdx and self.imageTranslations[self.roomIdx]:
             #self.roomTranslated.emit(self.roomIdx, self.imageTranslations[self.roomIdx])
             pass
         if ev.button() == QtCore.Qt.RightButton and self.roomIdx and self.imageRotations[self.roomIdx]:
             #self.roomRotated.emit(self.roomIdx, self.imageRotations[self.roomIdx])
             pass
+=======
+        if ev.button() == QtCore.Qt.LeftButton and self.roomIdx is not None and self.imageTranslations[self.roomIdx]:
+            x, y = self.imageTranslations[self.roomIdx]
+            #print('translation', x, y, 'being applied to point cloud')
+            #self.roomTranslated.emit(self.roomIdx, x, y)
+            return
+        if ev.button() == QtCore.Qt.RightButton and self.roomIdx is not None and self.imageRotations[self.roomIdx]:
+            self.roomRotated.emit(self.roomIdx, self.imageRotations[self.roomIdx])
+            return
+>>>>>>> ffd802c4aa4fd57bf866dd5b257b80103c03835b
             '''
             menu = self.menus[len(self.selectedShapesCopy) > 0]
             self.restoreCursor()
@@ -504,7 +514,7 @@ class Canvas(QtWidgets.QWidget):
                 pos = self.intersectionPoint(point, pos)
             shape.moveVertexBy(index, pos - point)
 
-    def rotateRoom(self, room, pos):
+    def rotateRoom(self, pos):
         if self.outOfPixmap(pos):
             return False
         o1 = pos + self.offsets[0]
@@ -513,17 +523,20 @@ class Canvas(QtWidgets.QWidget):
         o2 = pos + self.offsets[1]
         if self.outOfPixmap(o2):
             pos += QtCore.QPoint(min(0, self.boundingPixmap.width() - o2.x()), min(0, self.boundingPixmap.height() - o2.y()))
-        center = room.center
+        dims = QtCore.QPointF(self.images[self.roomIdx].width(), self.images[self.roomIdx].height())
+        off = self.imageOffsets[self.roomIdx]
+        center = QtCore.QPointF(off[0], off[1]) + dims / 2.0
         a, b = pos - center, self.prevPoint - center
         theta_a, theta_b = np.arctan2(a.y(), a.x()), np.arctan2(b.y(), b.x())
         angle = theta_b - theta_a
         if angle:
-            room.rotate(angle, center)
+            self.imageRotations[self.roomIdx] += angle
+            #self.roomRotated.emit(self.roomIdx, angle)
             self.prevPoint = pos
             return True
         return False
 
-    def translateRoom(self, room, pos):
+    def translateRoom(self, pos):
         if self.outOfPixmap(pos):
             return False
         o1 = pos + self.offsets[0]
@@ -534,7 +547,9 @@ class Canvas(QtWidgets.QWidget):
             pos += QtCore.QPoint(min(0, self.boundingPixmap.width() - o2.x()), min(0, self.boundingPixmap.height() - o2.y()))
         dp = pos - self.prevPoint
         if dp:
-            room.translate(dp)
+            x, y = self.imageTranslations[self.roomIdx]
+            #self.imageTranslations[self.roomIdx] = (x + dp.x(), y + dp.y())
+            self.roomTranslated.emit(self.roomIdx, x + dp.x(), y + dp.y())
             self.prevPoint = pos
             return True
         return False
@@ -874,6 +889,7 @@ class Canvas(QtWidgets.QWidget):
         self.update()
 
     def getRoomFromPosition(self, pos):
+<<<<<<< HEAD
         for image, offset in zip(self.images, self.imageOffsets):
             x, y = offset[0], self.boundingPixmap.height() - offset[1] - image.height()
             if pos.x() >= x and pos.x() <= x + self.boundingPixmap.width():
@@ -883,3 +899,6 @@ class Canvas(QtWidgets.QWidget):
                     return roomIdx
             else:
                 return 0
+=======
+        return None
+>>>>>>> ffd802c4aa4fd57bf866dd5b257b80103c03835b
