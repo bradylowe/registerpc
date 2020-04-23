@@ -1,0 +1,7 @@
+[console_scripts]
+registerpc = registerpc.__main__:main
+registerpc_draw_json = registerpc.cli.draw_json:main
+registerpc_draw_label_png = registerpc.cli.draw_label_png:main
+registerpc_json_to_dataset = registerpc.cli.json_to_dataset:main
+registerpc_on_docker = registerpc.cli.on_docker:main
+
