@@ -38,8 +38,6 @@ from registerpc.widgets import ToolBar
 from registerpc.widgets import UniqueLabelQListWidget
 from registerpc.widgets import ZoomWidget
 
-from registerpc.pointcloud.PointCloud import PointCloud
-from registerpc.pointcloud.Voxelize import VoxelGrid
 from registerpc.Room import Room
 
 
@@ -874,13 +872,11 @@ class MainWindow(QtWidgets.QMainWindow):
         return '.'
 
     def rotateRoom(self):
-        print('rotating room')
         self.canvas.overrideCursor(QtCore.Qt.OpenHandCursor)
         self.canvas.rotating = True
         self.canvas.translating = False
 
     def translateRoom(self):
-        print('translating room')
         self.canvas.overrideCursor(QtCore.Qt.CrossCursor)
         self.canvas.translating = True
         self.canvas.rotating = False
@@ -892,10 +888,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def fileSelectionChanged(self):
         items = self.fileListWidget.selectedItems()
-        rooms = []
-        for item in items:
-            rooms.append(self.getRoomByFilename(item.text()))
-        self.canvas.selectedRooms = rooms
+        if items:
+            room = self.getRoomByFilename(items[0].text())
+            if room:
+                self.canvas.roomIdx = room.index
+            else:
+                self.canvas.roomIdx = None
+        else:
+            self.canvas.roomIdx = None
 
     def roomChanged(self, filename):
         room = self.getRoomByFilename(filename)
@@ -920,7 +920,14 @@ class MainWindow(QtWidgets.QMainWindow):
         return offsets
 
     def roomRotated(self, idx, angle):
-        print('room rotated')
+        print('rotating room', idx, 'by', angle)
+        self.rooms[idx].rotate(angle)
+        self.updatePixmap()
+        print('rotated')
 
     def roomTranslated(self, idx, dx, dy):
-        print('room translated')
+        delta = np.array((dx, -dy, 0.0)) * self.mesh
+        print('translating room', idx, 'by', delta)
+        self.rooms[idx].translate(delta, idx=idx)
+        self.updatePixmap()
+        print('translated')
