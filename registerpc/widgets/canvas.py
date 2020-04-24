@@ -337,7 +337,7 @@ class Canvas(QtWidgets.QWidget):
         else:
             pos = self.transformPos(ev.posF())
         if ev.button() == QtCore.Qt.LeftButton:
-            #self.roomIdx = self.getRoomFromPosition(pos)
+            self.roomIdx = self.getRoomFromPosition(pos)
             self.prevPoint = pos
             return
         if ev.button() == QtCore.Qt.LeftButton:
@@ -387,14 +387,6 @@ class Canvas(QtWidgets.QWidget):
             pos = self.transformPos(ev.localPos())
         else:
             pos = self.transformPos(ev.posF())
-<<<<<<< HEAD
-        if ev.button() == QtCore.Qt.LeftButton and self.roomIdx and self.imageTranslations[self.roomIdx]:
-            #self.roomTranslated.emit(self.roomIdx, self.imageTranslations[self.roomIdx])
-            pass
-        if ev.button() == QtCore.Qt.RightButton and self.roomIdx and self.imageRotations[self.roomIdx]:
-            #self.roomRotated.emit(self.roomIdx, self.imageRotations[self.roomIdx])
-            pass
-=======
         if ev.button() == QtCore.Qt.LeftButton and self.roomIdx is not None and self.imageTranslations[self.roomIdx]:
             x, y = self.imageTranslations[self.roomIdx]
             #print('translation', x, y, 'being applied to point cloud')
@@ -403,7 +395,6 @@ class Canvas(QtWidgets.QWidget):
         if ev.button() == QtCore.Qt.RightButton and self.roomIdx is not None and self.imageRotations[self.roomIdx]:
             self.roomRotated.emit(self.roomIdx, self.imageRotations[self.roomIdx])
             return
->>>>>>> ffd802c4aa4fd57bf866dd5b257b80103c03835b
             '''
             menu = self.menus[len(self.selectedShapesCopy) > 0]
             self.restoreCursor()
@@ -889,16 +880,24 @@ class Canvas(QtWidgets.QWidget):
         self.update()
 
     def getRoomFromPosition(self, pos):
-<<<<<<< HEAD
+        self.boundingBoxes = []
         for image, offset in zip(self.images, self.imageOffsets):
-            x, y = offset[0], self.boundingPixmap.height() - offset[1] - image.height()
-            if pos.x() >= x and pos.x() <= x + self.boundingPixmap.width():
-                if pos.y() >= y and pos.y() <= y + self.boundingPixmap.height():
-                    roomIdx = self.images.index(image) + 1
-                    print(roomIdx)
-                    return roomIdx
-            else:
-                return 0
-=======
-        return None
->>>>>>> ffd802c4aa4fd57bf866dd5b257b80103c03835b
+            x1, y1 = offset[0], self.boundingPixmap.height() - offset[1] - image.height()
+            x2, y2 = x1 + image.width(), y1 + image.height()
+            box = [x1, y1, x2, y2]
+            self.boundingBoxes.append(box)
+        currentBoxes = []
+        smallestX, smallestY = 10000, 10000
+        for box in self.boundingBoxes:
+            if pos.x() >= box[0] and pos.x() <= box[2]:
+                if pos.y() >= box[1] and pos.y() <= box[3]:
+                    currentBoxes.append(box)
+                else:
+                    roomIdx = 0
+        for box in currentBoxes:
+            if box[2] - box[0] < smallestX:
+                smallestX = box[2] - box[0]
+                if box[3] - box[1] < smallestY:
+                    smallestY = box[3] - box[1]
+                    roomIdx = self.boundingBoxes.index(box)
+        return roomIdx

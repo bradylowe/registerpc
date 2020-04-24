@@ -435,7 +435,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.thickness = None
         self.sliceIdx = 0
         self.rooms = []
-        self.pointcloud = PointCloud(render=False)
+        #self.pointcloud = PointCloud(render=False)
         self.recentFiles = []
         self.maxRecent = 7
         self.otherData = {}
@@ -537,8 +537,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.max_points = None
         self.thickness = None
         self.mesh = None
-        self.pointcloud.close_viewer()
-        self.pointcloud = PointCloud(render=False)
+        # self.pointcloud.close_viewer()
+        # self.pointcloud = PointCloud(render=False)
         self.canvas.resetState()
 
     def addRecentFile(self, filename):
