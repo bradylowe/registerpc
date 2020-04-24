@@ -535,6 +535,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelList.clear()
         self.fileListWidget.clear()
         self.sliceIdx = 0
+        self.pointcloud3d.close_viewer()
         self.pointcloud3d = PointCloud(render=False)
         self.otherData = {}
         self.max_points = None
@@ -786,6 +787,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self, self.tr('%s - Choose Point Cloud file') % __appname__, '.', filters)
         if filenames:
             self.loadFiles(filenames)
+
+    def update3dViewer(self, values=None):
+        if self.pointcloud3d.viewer_is_ready():
+            self.pointcloud3d.render(showing=True)
+            if values is not None:
+                self.pointcloud3d.viewer.attributes(values)
+        else:
+            self.toggleActions(viewer=False)
 
     def saveFile(self, _value=False):
         assert not self.image.isNull(), "cannot save empty image"
