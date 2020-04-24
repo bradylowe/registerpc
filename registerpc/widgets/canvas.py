@@ -210,6 +210,7 @@ class Canvas(QtWidgets.QWidget):
                 if dp:
                     # If the room has been rotated, push the rotation to the pointcloud
                     if self.imageRotations[self.roomIdx]:
+                        # Todo: include center in rotation signal
                         self.roomRotated.emit(self.roomIdx, -self.imageRotations[self.roomIdx])
                         self.imageRotations[self.roomIdx] = 0.0
                     self.roomTranslated.emit(self.roomIdx, dp.x(), -dp.y())
@@ -466,6 +467,7 @@ class Canvas(QtWidgets.QWidget):
             self.boundedMoveShapes(shapes, point + offset)
 
     def getRotatedImageAndOffset(self, idx):
+        # Todo: fix offset calculation
         image = self.images[idx]
         dx, dy = 0.0, 0.0
         if self.imageRotations[idx]:
@@ -662,11 +664,9 @@ class Canvas(QtWidgets.QWidget):
             if ev.key() == QtCore.Qt.Key_Right:
                 self.imageRotations[self.roomIdx] += self.delta_theta
                 self.repaint()
-                #self.roomRotated.emit(self.roomIdx, np.radians(self.delta_theta))
             elif ev.key() == QtCore.Qt.Key_Left:
                 self.imageRotations[self.roomIdx] -= self.delta_theta
                 self.repaint()
-                #self.roomRotated.emit(self.roomIdx, np.radians(-self.delta_theta))
             elif ev.key() == QtCore.Qt.Key_Up or ev.key() == QtCore.Qt.Key_Equal or ev.key() == QtCore.Qt.Key_Plus:
                 self.delta_theta = min(16.0, self.delta_theta * 2.)
             elif ev.key() == QtCore.Qt.Key_Down or ev.key() == QtCore.Qt.Key_Minus:
@@ -674,6 +674,7 @@ class Canvas(QtWidgets.QWidget):
         elif self.translating:
             # If the room has been rotated, push the rotation to the pointcloud
             if self.imageRotations[self.roomIdx]:
+                # Todo: include center in rotation signal
                 self.roomRotated.emit(self.roomIdx, -self.imageRotations[self.roomIdx])
                 self.imageRotations[self.roomIdx] = 0.0
             if ev.key() == QtCore.Qt.Key_Right:
@@ -788,7 +789,7 @@ class Canvas(QtWidgets.QWidget):
     def getRoomFromPosition(self, pos):
         self.boundingBoxes = []
         for image, offset in zip(self.images, self.imageOffsets):
-            x1, y1 = offset[0], self.boundingPixmap.height() - offset[1] - image.height()
+            x1, y1 = offset[0], self.bounds.height() - offset[1] - image.height()
             x2, y2 = x1 + image.width(), y1 + image.height()
             box = [x1, y1, x2, y2]
             self.boundingBoxes.append(box)
