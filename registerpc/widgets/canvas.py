@@ -75,12 +75,14 @@ class Canvas(QtWidgets.QWidget):
         self.prevMovePoint = QtCore.QPoint()
         self.offsets = QtCore.QPoint(), QtCore.QPoint()
         self.scale = 1.0
-        self.boundingPixmap = QtGui.QPixmap()
+        self.bounds = QtGui.QPixmap()
         self.images = []
         self.imageOffsets = []
-        self.imageRotations = []
-        self.imageTranslations = []
         self.roomIdx = None
+        self.delta_theta = 1.0
+        self.delta = 4
+        self.rotating = False
+        self.translating = False
         self.visible = {}
         self._hideBackround = False
         self.hideBackround = False
@@ -187,113 +189,33 @@ class Canvas(QtWidgets.QWidget):
         self.prevMovePoint = pos
         self.restoreCursor()
 
-        # Polygon drawing.
-        if self.drawing():
-            self.line.shape_type = self.createMode
-
-            self.overrideCursor(CURSOR_DRAW)
-            if not self.current:
-                return
-
-            if self.outOfPixmap(pos):
-                # Don't allow the user to draw outside the pixmap.
-                # Project the point to the pixmap's edges.
-                pos = self.intersectionPoint(self.current[-1], pos)
-            elif len(self.current) > 1 and self.createMode == 'polygon' and self.closeEnough(pos, self.current[0]):
-                # Attract line to starting point and
-                # colorise to alert the user.
-                pos = self.current[0]
-                self.overrideCursor(CURSOR_POINT)
-                self.current.highlightVertex(0, Shape.NEAR_VERTEX)
-            if self.createMode in ['polygon', 'linestrip']:
-                self.line[0] = self.current[-1]
-                self.line[1] = pos
-            elif self.createMode == 'rectangle':
-                self.line.points = [self.current[0], pos]
-                self.line.close()
-            elif self.createMode == 'circle':
-                self.line.points = [self.current[0], pos]
-                self.line.shape_type = "circle"
-            elif self.createMode == 'line':
-                self.line.points = [self.current[0], pos]
-                self.line.close()
-            elif self.createMode == 'point':
-                self.line.points = [self.current[0]]
-                self.line.close()
-            
-            self.repaint()
-            self.current.highlightClear()
-            return
-
         # Rotating.
         if QtCore.Qt.RightButton & ev.buttons():
             if self.prevPoint and self.roomIdx is not None:
                 self.overrideCursor(CURSOR_ROTATE)
-                self.rotateRoom(pos)
-                self.repaint()
+                center = self.getSelectedRoomCenter()
+                angle = self.getAngleFromPosition(pos, center)
+                if angle:
+                    self.imageRotations[self.roomIdx] -= angle
+                    self.repaint()
             return
 
         # Translating
         if QtCore.Qt.LeftButton & ev.buttons():
             if self.prevPoint and self.roomIdx is not None:
                 self.overrideCursor(CURSOR_MOVE)
-                self.translateRoom(pos)
-                self.repaint()
+                dp = self.getDisplacementFromPosition(pos)
+                if dp:
+                    # If the room has been rotated, push the rotation to the pointcloud
+                    if self.imageRotations[self.roomIdx]:
+                        self.roomRotated.emit(self.roomIdx, -self.imageRotations[self.roomIdx])
+                        self.imageRotations[self.roomIdx] = 0.0
+                    self.roomTranslated.emit(self.roomIdx, dp.x(), -dp.y())
+                    self.repaint()
             return
 
-        '''
-        # Polygon/Vertex moving.
-        if QtCore.Qt.LeftButton & ev.buttons():
-            if self.selectedVertex():
-                self.boundedMoveVertex(pos)
-                self.repaint()
-                self.movingShape = True
-            elif self.selectedShapes and self.prevPoint:
-                self.overrideCursor(CURSOR_MOVE)
-                self.boundedMoveShapes(self.selectedShapes, pos)
-                self.repaint()
-                self.movingShape = True
-            return
-        '''
-
-        # Just hovering over the canvas, 2 possibilities:
-        # - Highlight shapes
-        # - Highlight vertex
-        # Update shape/vertex fill and tooltip value accordingly.
+        # Just hovering over the canvas
         self.setToolTip(self.tr("Image"))
-        for shape in reversed([s for s in self.shapes if self.isVisible(s)]):
-            # Look for a nearby vertex to highlight. If that fails,
-            # check if we happen to be inside a shape.
-            index = shape.nearestVertex(pos, self.epsilon / self.scale)
-            index_edge = shape.nearestEdge(pos, self.epsilon / self.scale)
-            if index is not None:
-                if self.selectedVertex():
-                    self.hShape.highlightClear()
-                self.hVertex = index
-                self.hShape = shape
-                self.hEdge = index_edge
-                shape.highlightVertex(index, shape.MOVE_VERTEX)
-                self.overrideCursor(CURSOR_POINT)
-                self.setToolTip(self.tr("Click & drag to move point"))
-                self.setStatusTip(self.toolTip())
-                self.update()
-                break
-            elif shape.containsPoint(pos):
-                if self.selectedVertex():
-                    self.hShape.highlightClear()
-                self.hVertex = None
-                self.hShape = shape
-                self.hEdge = index_edge
-                self.setToolTip(
-                    self.tr("Click & drag to move shape '%s'") % shape.label)
-                self.setStatusTip(self.toolTip())
-                self.overrideCursor(CURSOR_GRAB)
-                self.update()
-                break
-        else:  # Nothing found, clear highlights, reset state.
-            self.unHighlight()
-        self.edgeSelected.emit(self.hEdge is not None, self.hShape)
-        self.vertexSelected.emit(self.hVertex is not None)
 
     def addPointToEdge(self):
         shape = self.hShape
@@ -324,7 +246,7 @@ class Canvas(QtWidgets.QWidget):
 
     def getEdges(self, shape):
         x, y = shape.points[0].x(), shape.points[0].y()
-        w, h = self.boundingPixmap.width(), self.boundingPixmap.height()
+        w, h = self.bounds.width(), self.bounds.height()
         x1 = QtCore.QPoint(0, y)
         x2 = QtCore.QPoint(w, y)
         y1 = QtCore.QPoint(x, 0)
@@ -337,50 +259,15 @@ class Canvas(QtWidgets.QWidget):
         else:
             pos = self.transformPos(ev.posF())
         if ev.button() == QtCore.Qt.LeftButton:
+            self.rotating, self.translating = False, True
             #self.roomIdx = self.getRoomFromPosition(pos)
             self.prevPoint = pos
             return
-        if ev.button() == QtCore.Qt.LeftButton:
-            if self.drawing():
-                if self.current:
-                    # Add point to existing shape.
-                    if self.createMode == 'polygon':
-                        self.current.addPoint(self.line[1])
-                        self.line[0] = self.current[-1]
-                        if self.current.isClosed():
-                            self.finalise()
-                    elif self.createMode in ['rectangle', 'circle', 'line']:
-                        assert len(self.current.points) == 1
-                        self.current.points = self.line.points
-                        self.finalise()
-                    elif self.createMode == 'linestrip':
-                        self.current.addPoint(self.line[1])
-                        self.line[0] = self.current[-1]
-                        if int(ev.modifiers()) == QtCore.Qt.ControlModifier:
-                            self.finalise()
-                elif not self.outOfPixmap(pos):
-                    # Create new shape.
-                    self.current = Shape(shape_type=self.createMode)
-                    self.current.addPoint(pos)
-                    if self.createMode =='point':
-                        self.finalise()
-                    else:
-                        if self.createMode == 'circle':
-                            self.current.shape_type = 'circle'
-                        self.line.points = [pos, pos]
-                        self.setHiding()
-                        self.drawingPolygon.emit(True)
-                        self.update()
-            else:
-                group_mode = (int(ev.modifiers()) == QtCore.Qt.ControlModifier)
-                self.selectShapePoint(pos, multiple_selection_mode=group_mode)
-                self.prevPoint = pos
-                self.repaint()
-        elif ev.button() == QtCore.Qt.RightButton and self.editing():
-            group_mode = (int(ev.modifiers()) == QtCore.Qt.ControlModifier)
-            self.selectShapePoint(pos, multiple_selection_mode=group_mode)
+        elif ev.button() == QtCore.Qt.RightButton:
+            self.rotating, self.translating = True, False
+            #self.roomIdx = self.getRoomFromPosition(pos)
             self.prevPoint = pos
-            self.repaint()
+            return
 
     def mouseReleaseEvent(self, ev):
         if QT5:
@@ -388,38 +275,17 @@ class Canvas(QtWidgets.QWidget):
         else:
             pos = self.transformPos(ev.posF())
         if ev.button() == QtCore.Qt.LeftButton and self.roomIdx is not None and self.imageTranslations[self.roomIdx]:
-            x, y = self.imageTranslations[self.roomIdx]
-            #print('translation', x, y, 'being applied to point cloud')
-            #self.roomTranslated.emit(self.roomIdx, x, y)
-            return
+            pass
         if ev.button() == QtCore.Qt.RightButton and self.roomIdx is not None and self.imageRotations[self.roomIdx]:
-            self.roomRotated.emit(self.roomIdx, self.imageRotations[self.roomIdx])
-            return
-            '''
-            menu = self.menus[len(self.selectedShapesCopy) > 0]
-            self.restoreCursor()
-            if not menu.exec_(self.mapToGlobal(ev.pos())) \
-                    and self.selectedShapesCopy:
-                # Cancel the move by deleting the shadow copy.
-                self.selectedShapesCopy = []
-                self.repaint()
-            '''
-        elif ev.button() == QtCore.Qt.LeftButton and self.selectedShapes:
-            self.overrideCursor(CURSOR_GRAB)
-        elif ev.button() == QtCore.Qt.LeftButton and self.selectedVertex():
-            if 'rack' in self.hShape.label:
-                self.rackChanged.emit(self.hShape)
-            elif self.hShape.label == 'beam':
-                self.beamChanged.emit(self.hShape)
-
-        if self.movingShape and self.hShape:
-            index = self.shapes.index(self.hShape)
-            if (self.shapesBackups[-1][index].points !=
-                    self.shapes[index].points):
-                self.storeShapes()
-                self.shapeMoved.emit()
-
-            self.movingShape = False
+            show_menu = False
+            if show_menu:  # Show the context menu
+                menu = self.menus[len(self.selectedShapesCopy) > 0]
+                self.restoreCursor()
+                if not menu.exec_(self.mapToGlobal(ev.pos())) \
+                        and self.selectedShapesCopy:
+                    # Cancel the move by deleting the shadow copy.
+                    self.selectedShapesCopy = []
+                    self.repaint()
 
     def endMove(self, copy):
         assert self.selectedShapes and self.selectedShapesCopy
@@ -505,7 +371,13 @@ class Canvas(QtWidgets.QWidget):
                 pos = self.intersectionPoint(point, pos)
             shape.moveVertexBy(index, pos - point)
 
-    def rotateRoom(self, pos):
+    def getSelectedRoomCenter(self):
+        dims = QtCore.QPointF(self.images[self.roomIdx].width(), self.images[self.roomIdx].height())
+        offset = self.imageOffsets[self.roomIdx]
+        x, y = offset[0], self.bounds.height() - offset[1] - self.images[self.roomIdx].height()
+        return QtCore.QPointF(x, y) + dims / 2.0
+
+    def getAngleFromPosition(self, pos, center):
         if self.outOfPixmap(pos):
             return False
         o1 = pos + self.offsets[0]
@@ -513,21 +385,13 @@ class Canvas(QtWidgets.QWidget):
             pos -= QtCore.QPoint(min(0, o1.x()), min(0, o1.y()))
         o2 = pos + self.offsets[1]
         if self.outOfPixmap(o2):
-            pos += QtCore.QPoint(min(0, self.boundingPixmap.width() - o2.x()), min(0, self.boundingPixmap.height() - o2.y()))
-        dims = QtCore.QPointF(self.images[self.roomIdx].width(), self.images[self.roomIdx].height())
-        off = self.imageOffsets[self.roomIdx]
-        center = QtCore.QPointF(off[0], off[1]) + dims / 2.0
+            pos += QtCore.QPoint(min(0, self.bounds.width() - o2.x()), min(0, self.bounds.height() - o2.y()))
         a, b = pos - center, self.prevPoint - center
         theta_a, theta_b = np.arctan2(a.y(), a.x()), np.arctan2(b.y(), b.x())
-        angle = theta_b - theta_a
-        if angle:
-            self.imageRotations[self.roomIdx] += angle
-            #self.roomRotated.emit(self.roomIdx, angle)
-            self.prevPoint = pos
-            return True
-        return False
+        self.prevPoint = pos
+        return theta_b - theta_a
 
-    def translateRoom(self, pos):
+    def getDisplacementFromPosition(self, pos):
         if self.outOfPixmap(pos):
             return False
         o1 = pos + self.offsets[0]
@@ -535,15 +399,10 @@ class Canvas(QtWidgets.QWidget):
             pos -= QtCore.QPoint(min(0, o1.x()), min(0, o1.y()))
         o2 = pos + self.offsets[1]
         if self.outOfPixmap(o2):
-            pos += QtCore.QPoint(min(0, self.boundingPixmap.width() - o2.x()), min(0, self.boundingPixmap.height() - o2.y()))
+            pos += QtCore.QPoint(min(0, self.bounds.width() - o2.x()), min(0, self.bounds.height() - o2.y()))
         dp = pos - self.prevPoint
-        if dp:
-            x, y = self.imageTranslations[self.roomIdx]
-            #self.imageTranslations[self.roomIdx] = (x + dp.x(), y + dp.y())
-            self.roomTranslated.emit(self.roomIdx, x + dp.x(), y + dp.y())
-            self.prevPoint = pos
-            return True
-        return False
+        self.prevPoint = pos
+        return dp
 
     def boundedMoveShapes(self, shapes, pos):
         if self.outOfPixmap(pos):
@@ -553,8 +412,8 @@ class Canvas(QtWidgets.QWidget):
             pos -= QtCore.QPoint(min(0, o1.x()), min(0, o1.y()))
         o2 = pos + self.offsets[1]
         if self.outOfPixmap(o2):
-            pos += QtCore.QPoint(min(0, self.boundingPixmap.width() - o2.x()),
-                                 min(0, self.boundingPixmap.height() - o2.y()))
+            pos += QtCore.QPoint(min(0, self.bounds.width() - o2.x()),
+                                 min(0, self.bounds.height() - o2.y()))
         # XXX: The next line tracks the new position of the cursor
         # relative to the shape, but also results in making it
         # a bit "shaky" when nearing the border and allows it to
@@ -604,6 +463,18 @@ class Canvas(QtWidgets.QWidget):
         if not self.boundedMoveShapes(shapes, point - offset):
             self.boundedMoveShapes(shapes, point + offset)
 
+    def getRotatedImageAndOffset(self, idx):
+        image = self.images[idx]
+        dx, dy = 0.0, 0.0
+        if self.imageRotations[idx]:
+            rotation = QtGui.QTransform()
+            rotation.rotate(self.imageRotations[idx])
+            dx, dy = image.width(), image.height()
+            image = image.transformed(rotation)
+            dx, dy = dx - image.width() / 2., dy - image.height() / 2.
+        dx, dy = self.imageOffsets[idx][0] + dx, self.bounds.height() - self.imageOffsets[idx][1] - image.height() - dy
+        return image, QtCore.QPointF(dx, dy)
+
     def paintEvent(self, event):
         if not self.images:
             return super(Canvas, self).paintEvent(event)
@@ -617,9 +488,9 @@ class Canvas(QtWidgets.QWidget):
         p.scale(self.scale, self.scale)
         p.translate(self.offsetToCenter())
 
-        for image, offset in zip(self.images, self.imageOffsets):
-            x, y = offset[0], self.boundingPixmap.height() - offset[1] - image.height()
-            p.drawPixmap(x, y, QtGui.QPixmap.fromImage(image))
+        for i in range(len(self.images)):
+            image, offset = self.getRotatedImageAndOffset(i)
+            p.drawPixmap(offset.x(), offset.y(), QtGui.QPixmap.fromImage(image))
 
         Shape.scale = self.scale
         for shape in self.shapes:
@@ -651,14 +522,14 @@ class Canvas(QtWidgets.QWidget):
     def offsetToCenter(self):
         s = self.scale
         area = super(Canvas, self).size()
-        w, h = self.boundingPixmap.width() * s, self.boundingPixmap.height() * s
+        w, h = self.bounds.width() * s, self.bounds.height() * s
         aw, ah = area.width(), area.height()
         x = (aw - w) / (2 * s) if aw > w else 0
         y = (ah - h) / (2 * s) if ah > h else 0
         return QtCore.QPoint(x, y)
 
     def outOfPixmap(self, p):
-        w, h = self.boundingPixmap.width(), self.boundingPixmap.height()
+        w, h = self.bounds.width(), self.bounds.height()
         return not (0 <= p.x() <= w - 1 and 0 <= p.y() <= h - 1)
 
     def finalise(self):
@@ -689,7 +560,7 @@ class Canvas(QtWidgets.QWidget):
         # Cycle through each image edge in clockwise fashion,
         # and find the one intersecting the current line segment.
         # http://paulbourke.net/geometry/lineline2d/
-        size = self.boundingPixmap.size()
+        size = self.bounds.size()
         points = [(0, 0),
                   (size.width() - 1, 0),
                   (size.width() - 1, size.height() - 1),
@@ -744,8 +615,8 @@ class Canvas(QtWidgets.QWidget):
         return self.minimumSizeHint()
 
     def minimumSizeHint(self):
-        if self.boundingPixmap:
-            return self.scale * self.boundingPixmap.size()
+        if self.bounds:
+            return self.scale * self.bounds.size()
         return super(Canvas, self).minimumSizeHint()
 
     def wheelEvent(self, ev):
@@ -783,15 +654,38 @@ class Canvas(QtWidgets.QWidget):
         ev.accept()
 
     def keyPressEvent(self, ev):
-        key = ev.key()
-        if key == QtCore.Qt.Key_Escape and self.current:
-            self.current = None
-            self.drawingPolygon.emit(False)
-            self.update()
-        elif key == QtCore.Qt.Key_Return and self.canCloseShape():
-            self.finalise()
-        elif key == QtCore.Qt.Key_R:
-            self.rotateRack.emit()
+        if self.roomIdx is None:
+            return
+        if self.rotating:
+            if ev.key() == QtCore.Qt.Key_Right:
+                self.imageRotations[self.roomIdx] += self.delta_theta
+                self.repaint()
+                #self.roomRotated.emit(self.roomIdx, np.radians(self.delta_theta))
+            elif ev.key() == QtCore.Qt.Key_Left:
+                self.imageRotations[self.roomIdx] -= self.delta_theta
+                self.repaint()
+                #self.roomRotated.emit(self.roomIdx, np.radians(-self.delta_theta))
+            elif ev.key() == QtCore.Qt.Key_Up or ev.key() == QtCore.Qt.Key_Equal or ev.key() == QtCore.Qt.Key_Plus:
+                self.delta_theta = min(16.0, self.delta_theta * 2.)
+            elif ev.key() == QtCore.Qt.Key_Down or ev.key() == QtCore.Qt.Key_Minus:
+                self.delta_theta = max(0.05, self.delta_theta / 2.)
+        elif self.translating:
+            # If the room has been rotated, push the rotation to the pointcloud
+            if self.imageRotations[self.roomIdx]:
+                self.roomRotated.emit(self.roomIdx, -self.imageRotations[self.roomIdx])
+                self.imageRotations[self.roomIdx] = 0.0
+            if ev.key() == QtCore.Qt.Key_Right:
+                self.roomTranslated.emit(self.roomIdx, self.delta, 0.)
+            elif ev.key() == QtCore.Qt.Key_Left:
+                self.roomTranslated.emit(self.roomIdx, -self.delta, 0.)
+            elif ev.key() == QtCore.Qt.Key_Up:
+                self.roomTranslated.emit(self.roomIdx, 0., self.delta)
+            elif ev.key() == QtCore.Qt.Key_Down:
+                self.roomTranslated.emit(self.roomIdx, 0., -self.delta)
+            elif ev.key() == QtCore.Qt.Key_Equal or ev.key() == QtCore.Qt.Key_Plus:
+                self.delta = min(128, self.delta * 2)
+            elif ev.key() == ev.key() == QtCore.Qt.Key_Minus:
+                self.delta = min(1, self.delta / 2)
 
     def setLastLabel(self, text, flags):
         assert text
@@ -824,6 +718,14 @@ class Canvas(QtWidgets.QWidget):
             self.drawingPolygon.emit(False)
         self.repaint()
 
+    def loadImage(self, idx, image, offset):
+        self.images[idx] = image
+        self.imageOffsets[idx] = offset
+        self.imageRotations[idx] = 0.0
+        self.imageTranslations[idx] = (0.0, 0.0)
+        self.shapes = []
+        self.repaint()
+
     def loadImages(self, images, offsets):
         self.images = images
         self.imageOffsets = offsets
@@ -833,7 +735,7 @@ class Canvas(QtWidgets.QWidget):
         for image, offset in zip(images, offsets):
             min_x, min_y = min(min_x, offset[0]), min(min_y, offset[1])
             max_x, max_y = max(max_x, offset[0] + image.width()), max(max_y, offset[1] + image.height())
-        self.boundingPixmap = QtGui.QPixmap(max_x - min_x, max_y - min_y)
+        self.bounds = QtGui.QPixmap(max_x - min_x, max_y - min_y)
         self.shapes = []
         self.repaint()
 
@@ -875,7 +777,9 @@ class Canvas(QtWidgets.QWidget):
         self.imageOffsets = []
         self.imageRotations = []
         self.imageTranslations = []
-        self.boundingPixmap = QtGui.QPixmap()
+        self.delta_theta = 1.0
+        self.delta = 4
+        self.bounds = QtGui.QPixmap()
         self.shapesBackups = []
         self.update()
 

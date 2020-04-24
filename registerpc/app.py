@@ -39,6 +39,7 @@ from registerpc.widgets import UniqueLabelQListWidget
 from registerpc.widgets import ZoomWidget
 
 from registerpc.Room import Room
+from registerpc.pointcloud.PointCloud import PointCloud
 
 
 # TODO:
@@ -239,9 +240,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
         render_3d = action('Render points in 3D', self.render3d, None, 'render', 'Render the points in 3D')
 
-        rotate = action(self.tr('Rotate'), self.rotateRoom, None, None, self.tr('Rotate the selected room'), enabled=False)
+        rotate = action(self.tr('Rotate'), self.setRotating, None, None, self.tr('Rotate the selected room'), enabled=False)
 
-        translate = action(self.tr('Translate'), self.translateRoom, None, None, self.tr('Translate the selected room'),
+        translate = action(self.tr('Translate'), self.setTranslating, None, None, self.tr('Translate the selected room'),
                            enabled=False)
 
         hideAll = action(self.tr('&Hide\nPolygons'),
@@ -435,6 +436,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.thickness = None
         self.sliceIdx = 0
         self.rooms = []
+        self.pointcloud3d = PointCloud(render=False)
 
         self.recentFiles = []
         self.maxRecent = 7
@@ -533,6 +535,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.labelList.clear()
         self.fileListWidget.clear()
         self.sliceIdx = 0
+        self.pointcloud3d = PointCloud(render=False)
         self.otherData = {}
         self.max_points = None
         self.thickness = None
@@ -685,14 +688,17 @@ class MainWindow(QtWidgets.QMainWindow):
                     orientation, self.scroll_values[orientation][self.rooms[0].filename]
                 )
 
-    def updatePixmap(self, store=True):
+    def updatePixmap(self, idx=None):
         if not self.rooms:
             return
         if self.sliceIdx > self.maxSliceIdx:
             self.sliceIdx = self.minSliceIdx
         if self.sliceIdx < self.minSliceIdx:
             self.sliceIdx = self.maxSliceIdx
-        self.canvas.loadImages(self.getImages(), self.getImageOffsets())
+        if idx:
+            self.canvas.loadImage(idx, self.rooms[idx].images[self.sliceIdx], self.rooms[idx].min_point / self.mesh)
+        else:
+            self.canvas.loadImages(self.getImages(), self.getImageOffsets())
         #self.canvas.loadShapes(self.labelList.shapes, store=store)
 
     def resizeEvent(self, event):
@@ -720,15 +726,15 @@ class MainWindow(QtWidgets.QMainWindow):
         h1 = self.centralWidget().height() - e
         a1 = w1 / h1
         # Calculate a new scale value based on the pixmap's aspect ratio.
-        w2 = self.canvas.boundingPixmap.width() - 0.0
-        h2 = self.canvas.boundingPixmap.height() - 0.0
+        w2 = self.canvas.bounds.width() - 0.0
+        h2 = self.canvas.bounds.height() - 0.0
         a2 = w2 / h2
         return w1 / w2 if a2 >= a1 else h1 / h2
 
     def scaleFitWidth(self):
         # The epsilon does not seem to work too well here.
         w = self.centralWidget().width() - 2.0
-        return w / self.canvas.boundingPixmap.width()
+        return w / self.canvas.bounds.width()
 
     def closeEvent(self, event):
         if not self.mayContinue():
@@ -742,18 +748,18 @@ class MainWindow(QtWidgets.QMainWindow):
         # self.settings.setValue('window/geometry', self.saveGeometry())
 
     def render3d(self):
-        if not self.pointcloud.viewer_is_ready():
-            self.pointcloud.render_flag = True
-            self.pointcloud.viewer = None
-        self.pointcloud.render()
+        points = np.empty((0, 3))
+        for room in self.rooms:
+            points = np.append(points, room.points)
+        self.pointcloud3d = PointCloud(points)
 
     def qpointToPointcloud(self, p):
         return (p.x() * self.mesh + self.offset.x(),
-                (self.canvas.boundingPixmap.height() - p.y()) * self.mesh + self.offset.y())
+                (self.canvas.bounds.height() - p.y()) * self.mesh + self.offset.y())
 
     def pointcloudToQpoint(self, p):
         x = (p[0] - self.offset.x()) / self.mesh
-        y = self.canvas.boundingPixmap.height() - ((p[1] - self.offset.y()) / self.mesh)
+        y = self.canvas.bounds.height() - ((p[1] - self.offset.y()) / self.mesh)
         return QtCore.QPointF(x, y)
 
     # User Dialogs #
@@ -929,14 +935,16 @@ class MainWindow(QtWidgets.QMainWindow):
         return offsets
 
     def roomRotated(self, idx, angle):
-        print('rotating room', idx, 'by', angle)
         self.rooms[idx].rotate(angle)
-        self.updatePixmap()
-        print('rotated')
+        self.updatePixmap(idx)
 
     def roomTranslated(self, idx, dx, dy):
-        delta = np.array((dx, -dy, 0.0)) * self.mesh
-        print('translating room', idx, 'by', delta)
-        self.rooms[idx].translate(delta, idx=idx)
-        self.updatePixmap()
-        print('translated')
+        delta = np.array((dx, dy, 0.0)) * self.mesh
+        self.rooms[idx].translate(delta)
+        self.updatePixmap(idx)
+
+    def setRotating(self):
+        self.canvas.rotating, self.canvas.translating = True, False
+
+    def setTranslating(self):
+        self.canvas.rotating, self.canvas.translating = False, True
