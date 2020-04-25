@@ -901,3 +901,27 @@ class Canvas(QtWidgets.QWidget):
                     smallestY = box[3] - box[1]
                     roomIdx = self.boundingBoxes.index(box)
         return roomIdx
+
+    def getRoomFromPix(self, pos):
+        width, height, = 10, 10
+        self.boundingBoxes = []
+        for image, offset in zip(self.images, self.imageOffsets):
+            x1, y1 = offset[0], self.boundingPixmap.height() - offset[1] - image.height()
+            x2, y2 = x1 + image.width(), y1 + image.height()
+            box = [x1, y1, x2, y2]
+            self.boundingBoxes.append(box)
+        currentBoxes = []
+        smallestX, smallestY = 10000, 10000
+        for box in self.boundingBoxes:
+            if pos.x() >= box[0] and pos.x() <= box[2]:
+                if pos.y() >= box[1] and pos.y() <= box[3]:
+                    currentBoxes.append(box)
+                else:
+                    roomIdx = 0
+        for box in currentBoxes:
+            if box[2] - box[0] < smallestX:
+                smallestX = box[2] - box[0]
+                if box[3] - box[1] < smallestY:
+                    smallestY = box[3] - box[1]
+                    roomIdx = self.boundingBoxes.index(box)
+        return roomIdx
