@@ -264,6 +264,7 @@ class Canvas(QtWidgets.QWidget):
         if ev.button() == QtCore.Qt.LeftButton:
             self.rotating, self.translating = False, True
             self.roomIdx = self.getRoomFromPosition(pos)
+            self.getRoomFromPix(pos)
             self.prevPoint = pos
             return
         elif ev.button() == QtCore.Qt.RightButton:
@@ -810,25 +811,40 @@ class Canvas(QtWidgets.QWidget):
         return roomIdx
 
     def getRoomFromPix(self, pos):
-        width, height, = 10, 10
+        # these are the width and height for the buffer box around the click
+        width, height, = 5,5
         self.boundingBoxes = []
+        # find the bounding boxes for all the pixmaps
+        # This can probably be done somewhere else, right after
+        # the pixmaps are all loaded or something to speed up the function some
         for image, offset in zip(self.images, self.imageOffsets):
-            x1, y1 = offset[0], self.boundingPixmap.height() - offset[1] - image.height()
+            x1, y1 = offset[0], self.bounds.height() - offset[1] - image.height()
             x2, y2 = x1 + image.width(), y1 + image.height()
             box = [x1, y1, x2, y2]
             self.boundingBoxes.append(box)
         currentBoxes = []
-        smallestX, smallestY = 10000, 10000
+        # determine inside which pixmaps the click is
         for box in self.boundingBoxes:
             if pos.x() >= box[0] and pos.x() <= box[2]:
                 if pos.y() >= box[1] and pos.y() <= box[3]:
                     currentBoxes.append(box)
                 else:
                     roomIdx = 0
-        for box in currentBoxes:
-            if box[2] - box[0] < smallestX:
-                smallestX = box[2] - box[0]
-                if box[3] - box[1] < smallestY:
-                    smallestY = box[3] - box[1]
-                    roomIdx = self.boundingBoxes.index(box)
+        # get the buffer around the click
+        pixelValues = []
+        # rotate over every pixel in a box and get its value
+        # for some reason, this is getting the wrong pixels.  
+        # it says they are out of bounds
+        img = self.bounds.toImage()
+        for x in range(int(pos.x()) - width, int(pos.x()) + width):
+            for y in range(int(pos.y()) - height, int(pos.y()) + height):
+                pixelValues.append(img.pixel(x, y))
+        # Get RGB values for each pixel
+        pixelColors = []
+        for pixel in pixelValues:
+            pixelColors.append(QtGui.QColor(pixel).getRgb())
+        # find some way to average all the pixel values and determine which image
+        # they correspond to.
+        
+        print(pixelAve)
         return roomIdx

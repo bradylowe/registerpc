@@ -689,7 +689,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     orientation, self.scroll_values[orientation][self.rooms[0].filename]
                 )
 
-    def updatePixmap(self, idx=None):
+    def updatePixmap(self, idx=None, store=False):
         if not self.rooms:
             return
         if self.sliceIdx > self.maxSliceIdx:
