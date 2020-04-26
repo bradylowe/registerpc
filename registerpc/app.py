@@ -116,7 +116,6 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.shape_dock.setObjectName('Labels')
         self.shape_dock.setWidget(self.labelList)
-        #self.shape_dock.itemChanged.connect(self.toggleIndivPolygon)
 
         self.uniqLabelList = UniqueLabelQListWidget()
         self.uniqLabelList.setToolTip(self.tr(
@@ -135,7 +134,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.fileSearch = QtWidgets.QLineEdit()
         self.fileSearch.setPlaceholderText(self.tr('Search Filename'))
         self.fileListWidget = QtWidgets.QListWidget()
-        self.fileListWidget.itemSelectionChanged.connect(self.fileSelectionChanged)
+        #self.fileListWidget.itemSelectionChanged.connect(self.fileSelectionChanged)
         fileListLayout = QtWidgets.QVBoxLayout()
         fileListLayout.setContentsMargins(0, 0, 0, 0)
         fileListLayout.setSpacing(0)
@@ -943,8 +942,8 @@ class MainWindow(QtWidgets.QMainWindow):
             offsets.append(room.min_point / room.mesh)
         return offsets
 
-    def roomRotated(self, idx, angle):
-        self.rooms[idx].rotate(angle)
+    def roomRotated(self, idx, angle, cx, cy):
+        self.rooms[idx].rotate(angle, np.array((cx, cy)) * self.mesh)
         self.updatePixmap(idx)
 
     def roomTranslated(self, idx, dx, dy):

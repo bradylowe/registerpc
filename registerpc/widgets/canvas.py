@@ -6,6 +6,7 @@ from registerpc import QT5
 from registerpc.shape import Shape
 import registerpc.utils
 import numpy as np
+import qimage2ndarray
 
 
 # TODO(unknown):
@@ -38,7 +39,7 @@ class Canvas(QtWidgets.QWidget):
     rotateRack = QtCore.Signal()
     rotatePixmap = QtCore.Signal(float)
     translatePixmap = QtCore.Signal(float, float)
-    roomRotated = QtCore.Signal(int, float)
+    roomRotated = QtCore.Signal(int, float, float, float)
     roomTranslated = QtCore.Signal(int, float, float)
 
     CREATE, EDIT = 0, 1
@@ -80,6 +81,7 @@ class Canvas(QtWidgets.QWidget):
         self.imageOffsets = []
         self.imageRotations = []
         self.imageTranslations = []
+        self.imageBounds = []
         self.roomIdx = None
         self.delta_theta = 1.0
         self.delta = 4
@@ -198,7 +200,7 @@ class Canvas(QtWidgets.QWidget):
                 center = self.getSelectedRoomCenter()
                 angle = self.getAngleFromPosition(pos, center)
                 if angle:
-                    self.imageRotations[self.roomIdx] -= angle
+                    self.imageRotations[self.roomIdx] += np.degrees(angle)
                     self.repaint()
             return
 
@@ -208,12 +210,8 @@ class Canvas(QtWidgets.QWidget):
                 self.overrideCursor(CURSOR_MOVE)
                 dp = self.getDisplacementFromPosition(pos)
                 if dp:
-                    # If the room has been rotated, push the rotation to the pointcloud
-                    if self.imageRotations[self.roomIdx]:
-                        # Todo: include center in rotation signal
-                        self.roomRotated.emit(self.roomIdx, -self.imageRotations[self.roomIdx])
-                        self.imageRotations[self.roomIdx] = 0.0
-                    self.roomTranslated.emit(self.roomIdx, dp.x(), -dp.y())
+                    #self.roomTranslated.emit(self.roomIdx, dp.x(), -dp.y())
+                    self.imageTranslations[self.roomIdx] += dp
                     self.repaint()
             return
 
@@ -262,14 +260,18 @@ class Canvas(QtWidgets.QWidget):
         else:
             pos = self.transformPos(ev.posF())
         if ev.button() == QtCore.Qt.LeftButton:
-            self.rotating, self.translating = False, True
+            # If the room has been rotated, push the rotation to the pointcloud
             self.roomIdx = self.getRoomFromPosition(pos)
-            self.getRoomFromPix(pos)
+            if self.roomIdx and self.imageRotations[self.roomIdx]:
+                center = self.getSelectedRoomCenter(points_frame=True)
+                self.roomRotated.emit(self.roomIdx, self.imageRotations[self.roomIdx], center.x(), center.y())
+                self.imageRotations[self.roomIdx] = 0.0
+            self.rotating, self.translating = False, True
             self.prevPoint = pos
             return
         elif ev.button() == QtCore.Qt.RightButton:
+            self.roomIdx = self.getRoomFromPosition(pos)
             self.rotating, self.translating = True, False
-            #self.roomIdx = self.getRoomFromPosition(pos)
             self.prevPoint = pos
             return
 
@@ -278,18 +280,12 @@ class Canvas(QtWidgets.QWidget):
             pos = self.transformPos(ev.localPos())
         else:
             pos = self.transformPos(ev.posF())
-        if ev.button() == QtCore.Qt.LeftButton and self.roomIdx is not None and self.imageTranslations[self.roomIdx]:
-            pass
-        if ev.button() == QtCore.Qt.RightButton and self.roomIdx is not None and self.imageRotations[self.roomIdx]:
-            show_menu = False
-            if show_menu:  # Show the context menu
-                menu = self.menus[len(self.selectedShapesCopy) > 0]
-                self.restoreCursor()
-                if not menu.exec_(self.mapToGlobal(ev.pos())) \
-                        and self.selectedShapesCopy:
-                    # Cancel the move by deleting the shadow copy.
-                    self.selectedShapesCopy = []
-                    self.repaint()
+
+        if ev.button() == QtCore.Qt.LeftButton:
+            if self.roomIdx is not None and not self.imageTranslations[self.roomIdx].isNull():
+                trans = self.imageTranslations[self.roomIdx]
+                self.roomTranslated.emit(self.roomIdx, trans.x(), -trans.y())
+                self.imageTranslations[self.roomIdx] = QtCore.QPointF(0.0, 0.0)
 
     def endMove(self, copy):
         assert self.selectedShapes and self.selectedShapesCopy
@@ -375,35 +371,22 @@ class Canvas(QtWidgets.QWidget):
                 pos = self.intersectionPoint(point, pos)
             shape.moveVertexBy(index, pos - point)
 
-    def getSelectedRoomCenter(self):
-        dims = QtCore.QPointF(self.images[self.roomIdx].width(), self.images[self.roomIdx].height())
+    def getSelectedRoomCenter(self, points_frame=False):
         offset = self.imageOffsets[self.roomIdx]
-        x, y = offset[0], self.bounds.height() - offset[1] - self.images[self.roomIdx].height()
-        return QtCore.QPointF(x, y) + dims / 2.0
+        image = self.images[self.roomIdx]
+        dims = QtCore.QPointF(image.width(), image.height())
+        center = offset + dims / 2.0
+        if not points_frame:
+            center.setY(self.bounds.height() - center.y())
+        return center
 
     def getAngleFromPosition(self, pos, center):
-        if self.outOfPixmap(pos):
-            return False
-        o1 = pos + self.offsets[0]
-        if self.outOfPixmap(o1):
-            pos -= QtCore.QPoint(min(0, o1.x()), min(0, o1.y()))
-        o2 = pos + self.offsets[1]
-        if self.outOfPixmap(o2):
-            pos += QtCore.QPoint(min(0, self.bounds.width() - o2.x()), min(0, self.bounds.height() - o2.y()))
         a, b = pos - center, self.prevPoint - center
         theta_a, theta_b = np.arctan2(a.y(), a.x()), np.arctan2(b.y(), b.x())
         self.prevPoint = pos
         return theta_b - theta_a
 
     def getDisplacementFromPosition(self, pos):
-        if self.outOfPixmap(pos):
-            return False
-        o1 = pos + self.offsets[0]
-        if self.outOfPixmap(o1):
-            pos -= QtCore.QPoint(min(0, o1.x()), min(0, o1.y()))
-        o2 = pos + self.offsets[1]
-        if self.outOfPixmap(o2):
-            pos += QtCore.QPoint(min(0, self.bounds.width() - o2.x()), min(0, self.bounds.height() - o2.y()))
         dp = pos - self.prevPoint
         self.prevPoint = pos
         return dp
@@ -468,16 +451,15 @@ class Canvas(QtWidgets.QWidget):
             self.boundedMoveShapes(shapes, point + offset)
 
     def getRotatedImageAndOffset(self, idx):
-        # Todo: fix offset calculation
         image = self.images[idx]
         dx, dy = 0.0, 0.0
         if self.imageRotations[idx]:
             rotation = QtGui.QTransform()
-            rotation.rotate(self.imageRotations[idx])
+            rotation.rotate(-self.imageRotations[idx])
             dx, dy = image.width(), image.height()
             image = image.transformed(rotation)
-            dx, dy = dx - image.width() / 2., dy - image.height() / 2.
-        dx, dy = self.imageOffsets[idx][0] + dx, self.bounds.height() - self.imageOffsets[idx][1] - image.height() - dy
+            dx, dy = (dx - image.width()) / 2., (dy - image.height()) / 2.
+        dx, dy = self.imageOffsets[idx].x() + dx, self.bounds.height() - self.imageOffsets[idx].y() - image.height() - dy
         return image, QtCore.QPointF(dx, dy)
 
     def paintEvent(self, event):
@@ -495,6 +477,7 @@ class Canvas(QtWidgets.QWidget):
 
         for i in range(len(self.images)):
             image, offset = self.getRotatedImageAndOffset(i)
+            offset += self.imageTranslations[i]
             p.drawPixmap(offset.x(), offset.y(), QtGui.QPixmap.fromImage(image))
 
         Shape.scale = self.scale
@@ -672,11 +655,15 @@ class Canvas(QtWidgets.QWidget):
                 self.delta_theta = min(16.0, self.delta_theta * 2.)
             elif ev.key() == QtCore.Qt.Key_Down or ev.key() == QtCore.Qt.Key_Minus:
                 self.delta_theta = max(0.05, self.delta_theta / 2.)
+            elif ev.key() == QtCore.Qt.Key_Enter and self.roomIdx is not None and self.imageRotations[self.roomIdx]:
+                center = self.getSelectedRoomCenter(points_frame=True)
+                self.roomRotated.emit(self.roomIdx, self.imageRotations[self.roomIdx], center.x(), center.y())
+                self.imageRotations[self.roomIdx] = 0.0
         elif self.translating:
             # If the room has been rotated, push the rotation to the pointcloud
             if self.imageRotations[self.roomIdx]:
-                # Todo: include center in rotation signal
-                self.roomRotated.emit(self.roomIdx, -self.imageRotations[self.roomIdx])
+                center = self.getSelectedRoomCenter(points_frame=True)
+                self.roomRotated.emit(self.roomIdx, self.imageRotations[self.roomIdx], center.x(), center.y())
                 self.imageRotations[self.roomIdx] = 0.0
             if ev.key() == QtCore.Qt.Key_Right:
                 self.roomTranslated.emit(self.roomIdx, self.delta, 0.)
@@ -722,24 +709,38 @@ class Canvas(QtWidgets.QWidget):
             self.drawingPolygon.emit(False)
         self.repaint()
 
+    def calculateGlobalBounds(self):
+        min_x, min_y, max_x, max_y = np.inf, np.inf, -np.inf, -np.inf
+        for image, offset in zip(self.images, self.imageOffsets):
+            min_x, min_y = min(min_x, offset.x()), min(min_y, offset.y())
+            max_x, max_y = max(max_x, offset.x() + image.width()), max(max_y, offset.y() + image.height())
+        self.bounds = QtGui.QPixmap(max_x - min_x, max_y - min_y)
+
+    def getCanvasOffset(self, idx):
+        x, y = self.imageOffsets[idx].x(), self.bounds.height() - self.imageOffsets[idx].y() - self.images[idx].height()
+        return QtCore.QPointF(x, y)
+
+    def getImageBounds(self, idx):
+        offset = self.getCanvasOffset(idx)
+        return [offset, QtCore.QPointF(offset.x() + self.images[idx].width(), offset.y() + self.images[idx].height())]
+
     def loadImage(self, idx, image, offset):
         self.images[idx] = image
-        self.imageOffsets[idx] = offset
+        self.imageOffsets[idx] = QtCore.QPointF(offset[0], offset[1])
         self.imageRotations[idx] = 0.0
-        self.imageTranslations[idx] = (0.0, 0.0)
+        self.imageTranslations[idx] = QtCore.QPointF(0.0, 0.0)
+        self.calculateGlobalBounds()
+        self.imageBounds[idx] = self.getImageBounds(idx)
         self.shapes = []
         self.repaint()
 
     def loadImages(self, images, offsets):
         self.images = images
-        self.imageOffsets = offsets
+        self.imageOffsets = [QtCore.QPointF(off[0], off[1]) for off in offsets]
         self.imageRotations = [0.0] * len(self.images)
-        self.imageTranslations = [(0.0, 0.0)] * len(self.images)
-        min_x, min_y, max_x, max_y = np.inf, np.inf, -np.inf, -np.inf
-        for image, offset in zip(images, offsets):
-            min_x, min_y = min(min_x, offset[0]), min(min_y, offset[1])
-            max_x, max_y = max(max_x, offset[0] + image.width()), max(max_y, offset[1] + image.height())
-        self.bounds = QtGui.QPixmap(max_x - min_x, max_y - min_y)
+        self.imageTranslations = [QtCore.QPointF(0.0, 0.0) for _ in range(len(self.images))]
+        self.calculateGlobalBounds()
+        self.imageBounds = [self.getImageBounds(idx) for idx in range(len(self.images))]
         self.shapes = []
         self.repaint()
 
@@ -781,6 +782,7 @@ class Canvas(QtWidgets.QWidget):
         self.imageOffsets = []
         self.imageRotations = []
         self.imageTranslations = []
+        self.imageBounds = []
         self.delta_theta = 1.0
         self.delta = 4
         self.bounds = QtGui.QPixmap()
@@ -788,62 +790,29 @@ class Canvas(QtWidgets.QWidget):
         self.update()
 
     def getRoomFromPosition(self, pos):
-        self.boundingBoxes = []
-        for image, offset in zip(self.images, self.imageOffsets):
-            x1, y1 = offset[0], self.bounds.height() - offset[1] - image.height()
-            x2, y2 = x1 + image.width(), y1 + image.height()
-            box = [x1, y1, x2, y2]
-            self.boundingBoxes.append(box)
-        currentBoxes = []
-        smallestX, smallestY = 10000, 10000
-        for box in self.boundingBoxes:
-            if pos.x() >= box[0] and pos.x() <= box[2]:
-                if pos.y() >= box[1] and pos.y() <= box[3]:
-                    currentBoxes.append(box)
-                else:
-                    roomIdx = 0
-        for box in currentBoxes:
-            if box[2] - box[0] < smallestX:
-                smallestX = box[2] - box[0]
-                if box[3] - box[1] < smallestY:
-                    smallestY = box[3] - box[1]
-                    roomIdx = self.boundingBoxes.index(box)
-        return roomIdx
+        best_room, smallest_area = None, np.inf
+        for idx, box in enumerate(self.imageBounds):
+            cur_pos = pos + self.imageTranslations[idx]
+            if box[0].x() < cur_pos.x() < box[1].x() and box[0].y() < cur_pos.y() < box[1].y():
+                area = (box[1].x() - box[0].x()) * (box[1].y() - box[0].y())
+                if area < smallest_area:
+                    smallest_area = area
+                    best_room = idx
+        return best_room
 
     def getRoomFromPix(self, pos):
-        # these are the width and height for the buffer box around the click
-        width, height, = 5,5
-        self.boundingBoxes = []
-        # find the bounding boxes for all the pixmaps
-        # This can probably be done somewhere else, right after
-        # the pixmaps are all loaded or something to speed up the function some
-        for image, offset in zip(self.images, self.imageOffsets):
-            x1, y1 = offset[0], self.bounds.height() - offset[1] - image.height()
-            x2, y2 = x1 + image.width(), y1 + image.height()
-            box = [x1, y1, x2, y2]
-            self.boundingBoxes.append(box)
-        currentBoxes = []
-        # determine inside which pixmaps the click is
-        for box in self.boundingBoxes:
-            if pos.x() >= box[0] and pos.x() <= box[2]:
-                if pos.y() >= box[1] and pos.y() <= box[3]:
-                    currentBoxes.append(box)
-                else:
-                    roomIdx = 0
-        # get the buffer around the click
-        pixelValues = []
-        # rotate over every pixel in a box and get its value
-        # for some reason, this is getting the wrong pixels.  
-        # it says they are out of bounds
-        img = self.bounds.toImage()
-        for x in range(int(pos.x()) - width, int(pos.x()) + width):
-            for y in range(int(pos.y()) - height, int(pos.y()) + height):
-                pixelValues.append(img.pixel(x, y))
-        # Get RGB values for each pixel
-        pixelColors = []
-        for pixel in pixelValues:
-            pixelColors.append(QtGui.QColor(pixel).getRgb())
-        # find some way to average all the pixel values and determine which image
-        # they correspond to.
-        
-        return roomIdx
+        r = 5
+        best_room, best_pixels = None, 0
+        for idx, box in enumerate(self.imageBounds):
+            # Check to see if clicked position is inside the bounds of current image
+            if box[0].x() < pos.x() < box[1].x() and box[0].y() < pos.y() < box[1].y():
+                # Check to see if the number of nearby pixels is greater than the current max
+                values = qimage2ndarray.alpha_view(self.images[idx])
+                x, y = int(pos.x() - box[0].x()), int(pos.y() - box[0].y())
+                min_x, min_y = max(0, x-r), max(0, y-r)
+                max_x, max_y = min(values.shape[0]-1, x+r+1), min(values.shape[1]-1, y+r+1)
+                pixels = values[min_x:max_x, min_y:max_y].sum()
+                if pixels > best_pixels:
+                    best_pixels = pixels
+                    best_room = idx
+        return best_room

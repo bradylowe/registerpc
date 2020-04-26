@@ -61,6 +61,7 @@ class Room:
         pass
 
     def rotate_points(self, angle, center, idx=None):
+        angle = np.radians(angle)
         c, s = np.cos(angle), np.sin(angle)
         rot = np.array(((c, s), (-s, c)))
         if idx is None:
