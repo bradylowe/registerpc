@@ -846,5 +846,4 @@ class Canvas(QtWidgets.QWidget):
         # find some way to average all the pixel values and determine which image
         # they correspond to.
         
-        print(pixelAve)
         return roomIdx
