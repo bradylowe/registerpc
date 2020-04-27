@@ -1,9 +1,8 @@
 
 from registerpc.pointcloud.PointCloud import PointCloud
 from registerpc.pointcloud.Voxelize import VoxelGrid
-from registerpc.label_file import LabelFile, LabelFileError
-from tqdm import tqdm
-from qtpy import QtCore, QtGui
+from registerpc.label_file import LabelFile
+from qtpy import QtGui
 import numpy as np
 from collections import defaultdict
 import qimage2ndarray
@@ -58,7 +57,16 @@ class Room:
         self.rotate_points(angle, center, idx)
 
     def rotate_annotations(self, angle, center):
-        pass
+        # Todo: if rotation exceeds 45 degrees, update the rack orientations
+        angle = np.radians(angle)
+        c, s = np.cos(angle), np.sin(angle)
+        rot = np.array(((c, s), (-s, c)))
+        for sidx, shape in enumerate(self.annotations.shapes):
+            for pidx, p in enumerate(shape['points']):
+                p -= center[:2]
+                p = np.dot(p, rot)
+                p += center[:2]
+                self.annotations.shapes[sidx]['points'][pidx] = list(p)
 
     def rotate_points(self, angle, center, idx=None):
         angle = np.radians(angle)
@@ -83,7 +91,9 @@ class Room:
         self.translate_points(delta, idx)
 
     def translate_annotations(self, delta):
-        pass
+        for sidx, shape in enumerate(self.annotations.shapes):
+            for pidx, p in enumerate(shape['points']):
+                self.annotations.shapes[sidx]['points'][pidx] = list(p + delta[:2])
 
     def translate_points(self, delta, idx=None):
         if idx is None:
@@ -103,7 +113,7 @@ class Room:
         if labelFile is None:
             labelFile = self.labelFilename
         if shapes is None:
-            shapes = []
+            shapes = self.annotations.shapes
         self.pointcloud.write(pointFile, overwrite=True)
         self.annotations.save(labelFile, shapes, pointFile, otherData)
 
