@@ -23,6 +23,7 @@ from registerpc import PY2
 from registerpc import QT5
 
 from registerpc.dialogs.open_file_dialog import OpenFileDialog
+from registerpc.dialogs.choose_file_dialog import ChooseFileDialog
 
 from . import utils
 from registerpc.config import get_config
@@ -217,11 +218,11 @@ class MainWindow(QtWidgets.QMainWindow):
         )
 
         save = action(self.tr('&Save'),
-                      self.saveFile, shortcuts['save'], 'save',
-                      self.tr('Save labels to file'), enabled=False)
+                      self.saveFiles, shortcuts['save'], 'save',
+                      self.tr('Save changes to files'), enabled=False)
         saveAs = action(self.tr('&Save As'), self.saveFileAs,
                         shortcuts['save_as'],
-                        'save-as', self.tr('Save labels to a different file'),
+                        'save-as', self.tr('Save changes to different files'),
                         enabled=False)
 
         saveAuto = action(
@@ -332,6 +333,7 @@ class MainWindow(QtWidgets.QMainWindow):
             tool=(),
             # XXX: need to add some actions here to activate the shortcut
             onLoadActive=(
+                saveAs,
                 close,
                 showNextSlice,
                 showLastSlice,
@@ -339,12 +341,11 @@ class MainWindow(QtWidgets.QMainWindow):
                 rotate,
                 translate,
             ),
-            onShapesPresent=(saveAs, hideAll, showAll)
         )
 
         self.menus = utils.struct(
             file=self.menu(self.tr('&File')),
-            edit=self.menu(self.tr('&Edit')),
+            #edit=self.menu(self.tr('&Edit')),
             view=self.menu(self.tr('&View')),
             help=self.menu(self.tr('&Help')),
             recentFiles=QtWidgets.QMenu(self.tr('Open &Recent')),
@@ -503,12 +504,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self.dirty = True
         title = __appname__
         self.setWindowTitle(title)
+        self.actions.save.setEnabled(True)
 
     def setClean(self):
         self.dirty = False
         title = __appname__
         self.setWindowTitle(title)
-    
+        self.actions.save.setEnabled(False)
+
     def populateModeActions(self):
         tool = self.actions.tool
         self.tools.clear()
@@ -668,6 +671,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.status(self.tr('Loading points from file'))
         self.status(self.tr('Building pixel maps'))
         self.updatePixmap()
+        #self.canvas.loadShapes(self.getAllShapes())
         self.setZoomAndScroll()
         self.canvas.setEnabled(True)
 
@@ -688,7 +692,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     orientation, self.scroll_values[orientation][self.rooms[0].filename]
                 )
 
-    def updatePixmap(self, idx=None, store=False):
+    def updatePixmap(self, idx=None):
         if not self.rooms:
             return
         if self.sliceIdx > self.maxSliceIdx:
@@ -699,7 +703,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.canvas.loadImage(idx, self.rooms[idx].images[self.sliceIdx], self.rooms[idx].min_point / self.mesh)
         else:
             self.canvas.loadImages(self.getImages(), self.getImageOffsets())
-        #self.canvas.loadShapes(self.labelList.shapes, store=store)
 
     def resizeEvent(self, event):
         if self.canvas and self.rooms and self.zoomMode != self.MANUAL_ZOOM:
@@ -770,11 +773,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def showNextSlice(self, _value=False):
         self.sliceIdx += 1
-        self.updatePixmap(store=False)
+        self.updatePixmap()
 
     def showLastSlice(self, _value=False):
         self.sliceIdx -= 1
-        self.updatePixmap(store=False)
+        self.updatePixmap()
 
     def openPointCloud(self, _value=False):
         if not self.mayContinue():
@@ -795,26 +798,28 @@ class MainWindow(QtWidgets.QMainWindow):
         else:
             self.toggleActions(viewer=False)
 
-    def saveFile(self, _value=False):
-        assert not self.image.isNull(), "cannot save empty image"
-        if self._config['flags'] or self.hasLabels():
-            if self.labelFile:
-                # DL20180323 - overwrite when in directory
-                self._saveFile(self.labelFile.filename)
-            elif self.output_file:
-                self._saveFile(self.output_file)
-                self.close()
-            else:
-                self._saveFile(self.saveFileDialog())
-
     def saveFileAs(self, _value=False):
-        assert not self.image.isNull(), "cannot save empty image"
-        if self.hasLabels():
-            self._saveFile(self.saveFileDialog())
+        dlg = ChooseFileDialog([room.filename for room in self.rooms])
+        if dlg.exec():
+            filename = dlg.getSelectedFile()
+            if filename is None:
+                return
+            room = self.getRoomByFilename(filename)
+        else:
+            return
+        point_file = self.saveFileDialog(pointcloud=True)
+        label_file = self.saveFileDialog(pointcloud=False)
+        self.saveFile(room.index, point_file, label_file)
 
-    def saveFileDialog(self):
-        caption = self.tr('%s - Choose File') % __appname__
-        filters = self.tr('Label files (*%s)') % LabelFile.suffix
+    def saveFileDialog(self, pointcloud=True):
+        if pointcloud:
+            caption = self.tr('%s - Choose Point Cloud File') % __appname__
+            filters = self.tr('Point Cloud Files (*.las, *.ply, *.pcd, *.xyz, *.pts)')
+            default = 'output.las'
+        else:
+            caption = self.tr('%s - Choose Label File') % __appname__
+            filters = self.tr('Label Files (*%s)') % LabelFile.suffix
+            default = 'output.json'
         if self.output_dir:
             dlg = QtWidgets.QFileDialog(
                 self, caption, self.output_dir, filters
@@ -823,6 +828,9 @@ class MainWindow(QtWidgets.QMainWindow):
             dlg = QtWidgets.QFileDialog(
                 self, caption, self.currentPath(), filters
             )
+        dlg.setOption(QtWidgets.QFileDialog.DontConfirmOverwrite, False)
+        dlg.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, False)
+        '''
         dlg.setDefaultSuffix(LabelFile.suffix[1:])
         dlg.setAcceptMode(QtWidgets.QFileDialog.AcceptSave)
         dlg.setOption(QtWidgets.QFileDialog.DontConfirmOverwrite, False)
@@ -836,18 +844,24 @@ class MainWindow(QtWidgets.QMainWindow):
             default_labelfile_name = osp.join(
                 self.currentPath(), basename + LabelFile.suffix
             )
-        filename = dlg.getSaveFileName(
-            self, self.tr('Choose File'), default_labelfile_name,
-            self.tr('Label files (*%s)') % LabelFile.suffix)
+        '''
+        filename = dlg.getSaveFileName(self, caption, default, filters)
         if QT5:
             filename, _ = filename
         filename = str(filename)
         return filename
 
-    def _saveFile(self, filename):
-        if filename and self.saveLabels(filename):
-            self.addRecentFile(filename)
-            self.setClean()
+    def saveFile(self, idx, point_file=None, label_file=None):
+        if point_file is None:
+            point_file = self.rooms[idx].pointcloud.filename
+        if label_file is None:
+            label_file = self.rooms[idx].labelFilename
+        self.rooms[idx].save(point_file, label_file)
+
+    def saveFiles(self):
+        for room in self.rooms:
+            room.save()
+        self.setClean()
 
     def closeFile(self, _value=False):
         if not self.mayContinue():
@@ -882,7 +896,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if answer == mb.Discard:
             return True
         elif answer == mb.Save:
-            self.saveFile()
+            self.saveFiles()
             return True
         else:  # answer == mb.Cancel
             return False
@@ -945,11 +959,13 @@ class MainWindow(QtWidgets.QMainWindow):
     def roomRotated(self, idx, angle, cx, cy):
         self.rooms[idx].rotate(angle, np.array((cx, cy)) * self.mesh)
         self.updatePixmap(idx)
+        self.setDirty()
 
     def roomTranslated(self, idx, dx, dy):
         delta = np.array((dx, dy, 0.0)) * self.mesh
         self.rooms[idx].translate(delta)
         self.updatePixmap(idx)
+        self.setDirty()
 
     def setRotating(self):
         self.canvas.rotating, self.canvas.translating = True, False

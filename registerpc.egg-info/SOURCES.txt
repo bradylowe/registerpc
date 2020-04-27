@@ -2,6 +2,7 @@ MANIFEST.in
 README.md
 setup.cfg
 setup.py
+registerpc/Room.py
 registerpc/__init__.py
 registerpc/__main__.py
 registerpc/app.py

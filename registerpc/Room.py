@@ -97,7 +97,13 @@ class Room:
     def slice(self, idx):
         return self.pointcloud.points.iloc[self.slices[idx]][['x', 'y', 'z']].values
 
-    def save(self, pointFile, labelFile, shapes, otherData=None):
+    def save(self, pointFile=None, labelFile=None, shapes=None, otherData=None):
+        if pointFile is None:
+            pointFile = self.pointcloud.filename
+        if labelFile is None:
+            labelFile = self.labelFilename
+        if shapes is None:
+            shapes = []
         self.pointcloud.write(pointFile, overwrite=True)
         self.annotations.save(labelFile, shapes, pointFile, otherData)
 
