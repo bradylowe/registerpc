@@ -729,15 +729,15 @@ class MainWindow(QtWidgets.QMainWindow):
         h1 = self.centralWidget().height() - e
         a1 = w1 / h1
         # Calculate a new scale value based on the pixmap's aspect ratio.
-        w2 = self.canvas.bounds.width() - 0.0
-        h2 = self.canvas.bounds.height() - 0.0
+        w2 = self.canvas.globalBounds.width() - 0.0
+        h2 = self.canvas.globalBounds.height() - 0.0
         a2 = w2 / h2
         return w1 / w2 if a2 >= a1 else h1 / h2
 
     def scaleFitWidth(self):
         # The epsilon does not seem to work too well here.
         w = self.centralWidget().width() - 2.0
-        return w / self.canvas.bounds.width()
+        return w / self.canvas.globalBounds.width()
 
     def closeEvent(self, event):
         if not self.mayContinue():
@@ -758,11 +758,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def qpointToPointcloud(self, p):
         return (p.x() * self.mesh + self.offset.x(),
-                (self.canvas.bounds.height() - p.y()) * self.mesh + self.offset.y())
+                (self.canvas.globalBounds.height() - p.y()) * self.mesh + self.offset.y())
 
     def pointcloudToQpoint(self, p):
         x = (p[0] - self.offset.x()) / self.mesh
-        y = self.canvas.bounds.height() - ((p[1] - self.offset.y()) / self.mesh)
+        y = self.canvas.globalBounds.height() - ((p[1] - self.offset.y()) / self.mesh)
         return QtCore.QPointF(x, y)
 
     # User Dialogs #
@@ -795,8 +795,6 @@ class MainWindow(QtWidgets.QMainWindow):
             self.pointcloud3d.render(showing=True)
             if values is not None:
                 self.pointcloud3d.viewer.attributes(values)
-        else:
-            self.toggleActions(viewer=False)
 
     def saveFileAs(self, _value=False):
         dlg = ChooseFileDialog([room.filename for room in self.rooms])
