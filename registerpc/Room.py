@@ -26,6 +26,7 @@ class Room:
         self.mesh, self.thickness = mesh, thickness
         self.pointcloud = PointCloud(self.filename, max_points=max_points, render=False)
         self.annotations = LabelFile(self.labelFilename)
+        self.rotation_history = 0.0
         self.index = index
         self.min_point, self.max_point, self.min_idx, self.max_idx = None, None, None, None
         self.calculateMinMax()
@@ -55,13 +56,23 @@ class Room:
             center = self.center
         self.rotate_annotations(angle, center)
         self.rotate_points(angle, center, idx)
+        self.rotation_history += angle
 
     def rotate_annotations(self, angle, center):
-        # Todo: if rotation exceeds 45 degrees, update the rack orientations
-        angle = np.radians(angle)
-        c, s = np.cos(angle), np.sin(angle)
+        theta = np.radians(angle)
+        c, s = np.cos(theta), np.sin(theta)
         rot = np.array(((c, s), (-s, c)))
+        delta_orientation = 0
+        while angle > 45:
+            delta_orientation += 1
+            angle -= 90
+        while angle < -45:
+            delta_orientation -= 1
+            angle += 90
         for sidx, shape in enumerate(self.annotations.shapes):
+            orient = self.annotations.shapes[sidx]['orient']
+            if orient:
+                self.annotations.shapes[sidx]['orient'] = (orient + delta_orientation) % 4
             for pidx, p in enumerate(shape['points']):
                 p -= center[:2]
                 p = np.dot(p, rot)
