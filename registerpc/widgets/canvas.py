@@ -644,10 +644,10 @@ class Canvas(QtWidgets.QWidget):
             return
         if self.rotating:
             if ev.key() == QtCore.Qt.Key_Right:
-                self.rotations[self.roomIdx] += self.delta_theta
+                self.rotations[self.roomIdx] -= self.delta_theta
                 self.repaint()
             elif ev.key() == QtCore.Qt.Key_Left:
-                self.rotations[self.roomIdx] -= self.delta_theta
+                self.rotations[self.roomIdx] += self.delta_theta
                 self.repaint()
             elif ev.key() == QtCore.Qt.Key_Up or ev.key() == QtCore.Qt.Key_Equal or ev.key() == QtCore.Qt.Key_Plus:
                 self.delta_theta = min(16.0, self.delta_theta * 2.)
