@@ -1,25 +1,19 @@
 # -*- coding: utf-8 -*-
 
 import functools
-import os
 import os.path as osp
-import re
 import webbrowser
-from tqdm import tqdm, trange
 
-import PIL.Image
-from io import BytesIO
 import numpy as np
+import pandas as pd
 
 import imgviz
 from qtpy import QtCore
 from qtpy.QtCore import Qt
-from qtpy import QtGui
 from qtpy import QtWidgets
 from PyQt5.QtWidgets import QInputDialog, QDialog, QLineEdit, QDialogButtonBox, QFormLayout, QProgressBar
 
 from registerpc import __appname__
-from registerpc import PY2
 from registerpc import QT5
 
 from registerpc.dialogs.open_file_dialog import OpenFileDialog
@@ -28,9 +22,7 @@ from registerpc.dialogs.choose_file_dialog import ChooseFileDialog
 from . import utils
 from registerpc.config import get_config
 from registerpc.label_file import LabelFile
-from registerpc.label_file import LabelFileError
 from registerpc.logger import logger
-from registerpc.shape import Shape
 from registerpc.widgets import Canvas
 from registerpc.widgets import ColorDialog
 from registerpc.widgets import LabelDialog
@@ -217,13 +209,17 @@ class MainWindow(QtWidgets.QMainWindow):
             enabled=False,
         )
 
-        save = action(self.tr('&Save'),
+        save = action(self.tr('&Save All'),
                       self.saveFiles, shortcuts['save'], 'save',
                       self.tr('Save changes to files'), enabled=False)
         saveAs = action(self.tr('&Save As'), self.saveFileAs,
                         shortcuts['save_as'],
                         'save-as', self.tr('Save changes to different files'),
                         enabled=False)
+
+        merge = action(self.tr('Merge All'), self.mergeRooms, None, 'merge',
+                       self.tr('Merge all rooms into a single point cloud file and single annotations file'),
+                       enabled=False)
 
         saveAuto = action(
             text=self.tr('Save &Automatically'),
@@ -323,18 +319,19 @@ class MainWindow(QtWidgets.QMainWindow):
         # Store actions for further handling.
         self.actions = utils.struct(
             saveAuto=saveAuto,
-            save=save, saveAs=saveAs, open=open_, close=close,
+            save=save, saveAs=saveAs, merge=merge, open=open_, close=close,
             zoom=zoom, zoomIn=zoomIn, zoomOut=zoomOut, zoomOrg=zoomOrg,
             fitWindow=fitWindow, fitWidth=fitWidth,
             zoomActions=zoomActions,
             showNextSlice=showNextSlice, showLastSlice=showLastSlice,
             render3d=render_3d,
-            fileMenuActions=(open_, save, saveAs, close, quit),
+            fileMenuActions=(open_, save, saveAs, merge, close, quit),
             tool=(),
             # XXX: need to add some actions here to activate the shortcut
             onLoadActive=(
                 saveAs,
                 close,
+                merge,
                 showNextSlice,
                 showLastSlice,
                 render_3d,
@@ -402,6 +399,8 @@ class MainWindow(QtWidgets.QMainWindow):
             showNextSlice,
             showLastSlice,
             save,
+            saveAs,
+            merge,
             None,
             zoomIn,
             zoom,
@@ -818,31 +817,11 @@ class MainWindow(QtWidgets.QMainWindow):
             caption = self.tr('%s - Choose Label File') % __appname__
             filters = self.tr('Label Files (*%s)') % LabelFile.suffix
             default = 'output.json'
-        if self.output_dir:
-            dlg = QtWidgets.QFileDialog(
-                self, caption, self.output_dir, filters
-            )
-        else:
-            dlg = QtWidgets.QFileDialog(
-                self, caption, self.currentPath(), filters
-            )
+        dlg = QtWidgets.QFileDialog(self, caption, self.currentPath(), filters)
         dlg.setOption(QtWidgets.QFileDialog.DontConfirmOverwrite, False)
         dlg.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, False)
-        '''
-        dlg.setDefaultSuffix(LabelFile.suffix[1:])
+        dlg.setDefaultSuffix(default.split('.')[-1])
         dlg.setAcceptMode(QtWidgets.QFileDialog.AcceptSave)
-        dlg.setOption(QtWidgets.QFileDialog.DontConfirmOverwrite, False)
-        dlg.setOption(QtWidgets.QFileDialog.DontUseNativeDialog, False)
-        basename = osp.basename(osp.splitext(self.rooms[0].filename)[0])
-        if self.output_dir:
-            default_labelfile_name = osp.join(
-                self.output_dir, basename + LabelFile.suffix
-            )
-        else:
-            default_labelfile_name = osp.join(
-                self.currentPath(), basename + LabelFile.suffix
-            )
-        '''
         filename = dlg.getSaveFileName(self, caption, default, filters)
         if QT5:
             filename, _ = filename
@@ -970,3 +949,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def setTranslating(self):
         self.canvas.rotating, self.canvas.translating = False, True
+
+    def mergeRooms(self):
+        point_file = self.saveFileDialog(pointcloud=True)
+        if point_file is None:
+            return
+        label_file = self.saveFileDialog(pointcloud=False)
+        if label_file is None:
+            return
+        points = np.empty((0, 3))
+        shapes = []
+        for room in self.rooms:
+            points = np.append(points, room.points, axis=0)
+            shapes.extend(room.annotations.shapes)
+        pointcloud = PointCloud(render=False)
+        pointcloud.points = pd.DataFrame(points, columns=['x', 'y', 'z'])
+        pointcloud.write(point_file, overwrite=True)
+        annotations = LabelFile()
+        annotations.save(label_file, shapes, point_file)
