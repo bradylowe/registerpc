@@ -225,8 +225,8 @@ class PointCloud:
     def __write_las_file(self, filename, points):
         if self.las_header is None:
             self.las_header = Header()
-            self.las_header.offset = [0.0, 0.0, 0.0]
-            self.las_header.scale = [0.0001, 0.0001, 0.0001]
+            self.las_header.x_offset, self.las_header.y_offset, self.las_header.z_offset = 0.0, 0.0, 0.0
+            self.las_header.x_scale, self.las_header.y_scale, self.las_header.z_scale = 0.0001, 0.0001, 0.0001
         if self.las_header.data_format_id < 2:
             self.las_header.data_format_id = 2
         with File(filename, self.las_header, mode='w') as f:
