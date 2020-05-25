@@ -13,7 +13,8 @@ class Room:
     colors = ['black', 'red', 'blue', 'green', 'cyan', 'magenta']
     colors += colors[1:]
 
-    def __init__(self, filename, index, mesh, thickness, max_points=None):
+    def __init__(self, app, filename, index, mesh, thickness, max_points=None):
+        self.app = app
         filename = str(filename)
         if max_points is None:
             max_points = 1000000000
@@ -48,10 +49,14 @@ class Room:
         self.min_idx, self.max_idx = (self.min_point / self.mesh).astype(int), (self.max_point / self.mesh).astype(int)
 
     def buildImages(self):
+        self.app.status('Building images for %s' % self.filename)
         for idx in range(self.min_slice, self.max_slice + 1):
+            self.app.progressBar.setValue((idx / (self.max_slice - self.min_slice)) * 100)
             self.buildImage(idx)
+        self.app.progressBar.reset()
 
     def rotate(self, angle, center=None, idx=None):
+        self.app.status('Rotating points')
         if center is None:
             center = self.center
         self.rotate_annotations(angle, center)
@@ -127,6 +132,7 @@ class Room:
             shapes = self.annotations.shapes
         self.pointcloud.write(pointFile, overwrite=True)
         self.annotations.save(labelFile, shapes, pointFile, otherData)
+        self.app.status('Room %d saved into files %s and %s' % (self.index, pointFile, labelFile))
 
     def buildImage(self, idx):
         vg = VoxelGrid(self.slice(idx), (self.mesh, self.mesh, 100000.), (0.0, 0.0, -10000.))

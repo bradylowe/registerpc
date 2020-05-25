@@ -6,6 +6,7 @@ import webbrowser
 
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 
 import imgviz
 from qtpy import QtCore
@@ -660,8 +661,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
 
         self.rooms = []
-        for i, filename in enumerate(filenames):
-            self.rooms.append(Room(filename, i, self.mesh, self.thickness, self.max_points))
+        for i, filename in enumerate(tqdm(filenames, desc='Loading point cloud files')):
+            self.rooms.append(Room(self, filename, i, self.mesh, self.thickness, self.max_points))
             item = QtWidgets.QListWidgetItem(self.rooms[-1].filename)
             item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.fileListWidget.addItem(item)
